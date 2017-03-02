@@ -647,3 +647,16 @@ parseLogErrs(uint16_t type, uint16_t len, unsigned char *data,
 {
     pktLogErrs("PADT", type, len, data, extra);
 }
+
+char *fmtMacAddr(uint8_t *pMacAddr)
+{
+	static char strMAC[2*ETH_ALEN];
+
+	sprintf(strMAC, "%02X:%02X:%02X:%02X:%02X:%02X",
+			pMacAddr[0], pMacAddr[1], pMacAddr[2],
+			pMacAddr[3], pMacAddr[4], pMacAddr[5]);
+
+  return strMAC;
+}
+
+

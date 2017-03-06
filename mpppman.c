@@ -55,6 +55,7 @@
 
 #define INTERFACE "vlan50"
 int debuglevel=4;
+time_t time_now = 0;
 
 void cb_func(evutil_socket_t fd, short what, void *arg)
 {

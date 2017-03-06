@@ -36,14 +36,9 @@ typedef struct InterfaceStruct {
 	unsigned char mac[ETH_ALEN];	/* MAC address */
 } PPPoEInterface;
 
-typedef struct SessionStruct {
-	unsigned int epoch;			/* Epoch when last activity was seen */
-	uint16_t sesNum;			/* Session number */
-	PPPoEInterface const *iface;		/* Interface */
-	unsigned char peerMac[ETH_ALEN];	/* Peer's MAC address */
-} PPPoESession;
-
 PPPoEInterface * openPPPoEInterface(char const *ifname, int clientOK, int acOK, struct event_base *);
 void processSession(const PPPoEInterface *iface, uint8_t *pack, int size);
 void processDiscovery(const PPPoEInterface *iface, uint8_t *pack, int size);
+void pppoe_sess_send(const PPPoEInterface *iface, const uint8_t *pack, uint16_t l);
+uint8_t *pppoe_session_header(uint8_t *b, const PPPoEInterface *iface, const uint8_t *dst, uint16_t sid);
 #endif

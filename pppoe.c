@@ -39,13 +39,12 @@
 #include "if.h"
 #include "log.h"
 #include "pppoe.h"
+#include "ppp.h"
 #include "md5.h"
 
 
 #define SESS_CODE           0x00
 #define DEFAULT_PPPOE_AC_NAME "mpppman"
-
-PPPoESession pppoe_sessions[MAX_PPPOE_SESSION];
 
 static uint8_t bc_addr[ETH_ALEN] = {0xff, 0xff, 0xff, 0xff, 0xff, 0xff};
 
@@ -100,42 +99,6 @@ char * get_string_codepad(uint8_t codepad)
 	}
 	
 	return ptrch;
-}
-
-/* Find a session that has the given session id, 0 will find a free session
-*/
-static PPPoESession *pppoe_find_session(uint16_t sid)
-{
-	int i;
-
-	for (i=0; i<MAX_PPPOE_SESSION; i++) {
-		if (pppoe_sessions[i].sesNum==sid) {
-			return(&pppoe_sessions[i]);
-		}
-	}
-	return(NULL);
-}
-
-/* Allocate and fill new session - returns PPPoESession */
-static PPPoESession * pppoe_new_session(const PPPoEInterface *iface, const uint8_t *addr)
-{
-	uint16_t sid;
-	int i;
-	PPPoESession *pppoeSession;
-
-	if ((pppoeSession=pppoe_find_session(0)) == NULL) {
-		LOG(0, "No free PPPoeSession available\n");
-	}
-	
-	do {
-		sid=random() & 0xffff; // Lower 16 bits
-	} while(pppoe_find_session(sid)!=NULL);
-
-	pppoeSession->sesNum=sid;
-	pppoeSession->iface=iface;
-	memcpy(pppoeSession->peerMac, addr, ETH_ALEN);
-
-	return(pppoeSession);
 }
 
 void PPPoE_cb_func(evutil_socket_t fd, short what, void *arg)
@@ -309,35 +272,15 @@ static void pppoe_send_err(const PPPoEInterface *iface, const uint8_t *addr, con
 	pppoe_disc_send(iface, pack);
 }
 
-#if 0
-void pppoe_sess_send(const uint8_t *pack, uint16_t l, tunnelidt t)
+void pppoe_sess_send(const PPPoEInterface *iface, const uint8_t *pack, uint16_t l)
 {
 	struct pppoe_hdr *hdr = (struct pppoe_hdr *)(pack + ETH_HLEN);
 	int n;
 	uint16_t sizeppp;
-	sessionidt s;
-
-	if (t != TUNNEL_ID_PPPOE)
-	{
-		LOG(3, 0, t, "ERROR pppoe_sess_send: Tunnel %d is not a tunnel pppoe\n", t);
-		return;
-	}
-
-	if (config->pppoe_client) {
-		s = pppoe_local_sid;
-	} else {
-		s = ntohs(hdr->sid);
-	}
-
-	if (session[s].tunnel != t)
-	{
-		LOG(3, s, t, "ERROR pppoe_sess_send: Session is not a session pppoe\n");
-		return;
-	}
 
 	if (l < (ETH_HLEN + sizeof(*hdr) + 3))
 	{
-		LOG(0, s, t, "ERROR pppoe_sess_send: packet too small for pppoe sent (size=%d)\n", l);
+		LOG(0, "ERROR pppoe_sess_send: packet too small for pppoe sent (size=%d)\n", l);
 		return;
 	}
 
@@ -347,13 +290,12 @@ void pppoe_sess_send(const uint8_t *pack, uint16_t l, tunnelidt t)
 
 	LOG_HEX(5, "pppoe_sess_send", pack, l);
 
-	n = write(pppoesessfd, pack, l);
+	n = write(iface->sessionSock, pack, l);
 	if (n < 0 )
-		LOG(0, s, t, "pppoe_sess_send: write: %s\n", strerror(errno));
+		LOG(0, "pppoe_sess_send: write: %s\n", strerror(errno));
 	else if (n != l)
-		LOG(0, s, t, "pppoe_sess_send: short write %i/%i\n", n,l);
+		LOG(0, "pppoe_sess_send: short write %i/%i\n", n,l);
 }
-#endif
 
 // Only used in server mode
 static void pppoe_send_PADO(const PPPoEInterface *iface, const uint8_t *addr, const struct pppoe_tag *host_uniq, const struct pppoe_tag *relay_sid, const struct pppoe_tag *service_name)
@@ -479,7 +421,7 @@ static void pppoe_recv_PADR(const PPPoEInterface *iface, uint8_t *pack, int size
 	struct pppoe_tag *ac_cookie_tag = NULL;
 	struct pppoe_tag *service_name_tag = NULL;
 	int n, service_match = 0;
-	PPPoESession *pppoe_session;
+	PPPSession *pppSession;
 	uint16_t sid;
 
 	if (!memcmp(ethhdr->h_dest, bc_addr, ETH_ALEN))
@@ -558,7 +500,7 @@ TODO
 		return;
 	}
 
-	pppoe_session=pppoe_new_session(iface, ethhdr->h_source);
+	pppSession=ppp_new_session(iface, ethhdr->h_source);
 #if 0
 	sid = sessionfree;
 	sessionfree = session[sid].next;
@@ -590,11 +532,10 @@ TODO
 
 	memcpy(session[sid].src_hwaddr, ethhdr->h_source, ETH_ALEN);
 #endif
-	pppoe_send_PADS(iface, pppoe_session->sesNum, ethhdr->h_source, host_uniq_tag, relay_sid_tag, service_name_tag);
+	pppoe_send_PADS(iface, pppSession->sesNum, ethhdr->h_source, host_uniq_tag, relay_sid_tag, service_name_tag);
 
-	//sendlcp(sid, session[sid].tunnel);
-	//change_state(sid, lcp, RequestSent);
-
+	sendlcp(pppSession);
+	change_state(pppSession, lcp, RequestSent);
 }
 
 
@@ -813,4 +754,8 @@ void processSession(const PPPoEInterface *iface, uint8_t *pack, int size)
 #endif
 }
 
+uint8_t *pppoe_session_header(uint8_t *b, const PPPoEInterface *iface, const uint8_t *dst, uint16_t sid)
+{
+	return(setup_header(b, iface->mac, dst, SESS_CODE, sid, ETH_P_PPP_SES));
+}
 

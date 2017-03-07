@@ -127,12 +127,12 @@ void PPPoE_cb_func(evutil_socket_t fd, short what, void *arg)
 
 /* Find a session that has the given session id, 0 will find a free session
 */
-PPPoESession *pppoe_find_session(uint16_t sid)
+PPPoESession *pppoe_find_session(uint16_t sid, uint8_t *addr)
 {
 	int i;
 
 	for (i=0; i<MAX_PPPOE_SESSION; i++) {
-		if (pppoe_sessions[i].sid==sid) {
+		if (pppoe_sessions[i].sid==sid && (addr==NULL || memcmp(pppoe_sessions[i].peerMac, addr, ETH_ALEN)==0)) {
 			return(&pppoe_sessions[i]);
 		}
 	}
@@ -146,18 +146,18 @@ PPPoESession * pppoe_new_session(const PPPoEInterface *iface, const uint8_t *add
 	int i;
 	PPPoESession *pppoeSession;
 
-	if ((pppoeSession=pppoe_find_session(0)) == NULL) {
+	if ((pppoeSession=pppoe_find_session(0, NULL)) == NULL) {
 		LOG(0, "No free PPPoESession available\n");
 	}
 	
 	do {
 		sid=random() & 0xffff; // Lower 16 bits
-	} while(pppoe_find_session(sid)!=NULL);
+	} while(pppoe_find_session(sid, NULL)!=NULL);
 
 	pppoeSession->sid=sid;
 	pppoeSession->iface=iface;
 	memcpy(pppoeSession->peerMac, addr, ETH_ALEN);
-	LOG(3, "PPPoESession allocated with sid=%04x\n", pppoeSession->sid);
+	LOG(3, "PPPoESession allocated with sid=0x%04x\n", pppoeSession->sid);
 	return(pppoeSession);
 }
 
@@ -381,6 +381,20 @@ static void pppoe_send_PADS(const PPPoEInterface *iface, uint16_t sid, const uin
 	pppoe_disc_send(iface, pack);
 }
 
+
+// Server or client mode
+static void pppoe_send_PADT(const PPPoEInterface *iface, uint16_t sid, const uint8_t *addr)
+{
+	uint8_t pack[ETHER_MAX_LEN];
+
+	setup_header(pack, iface->mac, addr, PADT_CODE, sid, ETH_P_PPP_DISC);
+
+	add_ac_name_tag(pack);
+
+	LOG(3, "pppoe: Sent PADT sid=0x%04x\n", sid);
+
+	pppoe_disc_send(iface, pack);
+}
 
 // Only used in server mode
 static void pppoe_recv_PADI(const PPPoEInterface *iface, uint8_t *pack, int size)
@@ -650,147 +664,48 @@ void processDiscovery(const PPPoEInterface *iface, uint8_t *pack, int size)
 
 void processSession(const PPPoEInterface *iface, uint8_t *pack, int size)
 {
-#if 0
-	//struct ethhdr *ethhdr = (struct ethhdr *)pack;
+	struct ethhdr *ethhdr = (struct ethhdr *)pack;
 	struct pppoe_hdr *hdr = (struct pppoe_hdr *)(pack + ETH_HLEN);
 	uint16_t lppp = ntohs(hdr->length);
 	uint8_t *pppdata = (uint8_t *) hdr->tag;
 	uint16_t proto, sid, t;
 	int doclient=0;
+	PPPoESession *pppoeSession;
 
 	if (doclient) {
+#if 0
 		sid = pppoe_local_sid;
 		if (pppoe_remote_sid!=ntohs(hdr->sid)) {
-			LOG(0, sid, t, "Received pppoe packet with invalid session ID\n");
+			LOG(0, sid, t, "Received pppoe packet with invalid session ID (0x%04x)\n", sid;);
 		}
+#endif
 	} else {
 		sid = ntohs(hdr->sid);
 	}
 
 	LOG_HEX(5, "RCV PPPOE Sess", pack, size);
 
-	if (sid >= MAXSESSION)
+	if ((pppoeSession=pppoe_find_session(sid, ethhdr->h_source))==NULL)
 	{
-		LOG(0, sid, t, "Received pppoe packet with invalid session ID\n");
-		STAT(tunnel_rx_errors);
-		return;
-	}
-
-	if (session[sid].tunnel != t)
-	{
-		if (!config->cluster_iam_master) { master_forward_pppoe_packet(pack, size, hdr->code); return; }
-
-		LOG(1, sid, t, "ERROR process_pppoe_sess: Session is not a session pppoe\n");
+		LOG(0, "Received pppoe packet with invalid session ID (0x%04x)\n", sid);
+		pppoe_send_PADT(iface, sid, ethhdr->h_source);
 		return;
 	}
 
 	if (hdr->ver != 1)
 	{
-		LOG(3, sid, t, "Error process_pppoe_sess: discarding packet (unsupported version %i)\n", hdr->ver);
+		LOG(3, "Error processSession: discarding packet (unsupported version %i)\n", hdr->ver);
 		return;
 	}
 
 	if (hdr->type != 1)
 	{
-		LOG(3, sid, t, "Error process_pppoe_sess: discarding packet (unsupported type %i)\n", hdr->type);
+		LOG(3, "Error processSession: discarding packet (unsupported type %i)\n", hdr->type);
 		return;
 	}
 
-	if (lppp > 2 && pppdata[0] == 0xFF && pppdata[1] == 0x03)
-	{	// HDLC address header, discard
-		LOG(5, sid, t, "pppoe_sess: HDLC address header, discard\n");
-		pppdata += 2;
-		lppp -= 2;
-	}
-	if (lppp < 2)
-	{
-		LOG(3, sid, t, "Error process_pppoe_sess: Short ppp length %d\n", lppp);
-		return;
-	}
-	if (*pppdata & 1)
-	{
-		proto = *pppdata++;
-		lppp--;
-	}
-	else
-	{
-		proto = ntohs(*(uint16_t *) pppdata);
-		pppdata += 2;
-		lppp -= 2;
-	}
+	processPPP(pppoeSession->pppSession, pppdata, lppp);
 
-	if (session[sid].forwardtosession)
-	{	// Must be forwaded to a remote lns tunnel l2tp
-		pppoe_forwardto_session_rmlns(pack, size, sid, proto);
-		return;
-	}
-
-	if (proto == PPPPAP)
-	{
-		session[sid].last_packet = time_now;
-		if (!config->cluster_iam_master) { master_forward_pppoe_packet(pack, size, hdr->code); return; }
-		processpap(sid, t, pppdata, lppp);
-	}
-	else if (proto == PPPCHAP)
-	{
-		session[sid].last_packet = time_now;
-		if (!config->cluster_iam_master) { master_forward_pppoe_packet(pack, size, hdr->code); return; }
-		processchap(sid, t, pppdata, lppp);
-	}
-	else if (proto == PPPLCP)
-	{
-		session[sid].last_packet = time_now;
-		if (!config->cluster_iam_master) { master_forward_pppoe_packet(pack, size, hdr->code); return; }
-		processlcp(sid, t, pppdata, lppp);
-	}
-	else if (proto == PPPIPCP)
-	{
-		session[sid].last_packet = time_now;
-		if (!config->cluster_iam_master) { master_forward_pppoe_packet(pack, size, hdr->code); return; }
-		processipcp(sid, t, pppdata, lppp);
-	}
-	else if (proto == PPPIPV6CP && config->ipv6_prefix.s6_addr[0])
-	{
-		session[sid].last_packet = time_now;
-		if (!config->cluster_iam_master) { master_forward_pppoe_packet(pack, size, hdr->code); return; }
-		processipv6cp(sid, t, pppdata, lppp);
-	}
-	else if (proto == PPPCCP)
-	{
-		session[sid].last_packet = time_now;
-		if (!config->cluster_iam_master) { master_forward_pppoe_packet(pack, size, hdr->code); return; }
-		processccp(sid, t, pppdata, lppp);
-	}
-	else if (proto == PPPIP)
-	{
-		session[sid].last_packet = session[sid].last_data = time_now;
-		if (session[sid].walled_garden && !config->cluster_iam_master) { master_forward_pppoe_packet(pack, size, hdr->code); return; }
-		processipin(sid, t, pppdata, lppp);
-	}
-	else if (proto == PPPMP)
-	{
-		session[sid].last_packet = session[sid].last_data = time_now;
-		if (!config->cluster_iam_master) { master_forward_pppoe_packet(pack, size, hdr->code); return; }
-		processmpin(sid, t, pppdata, lppp);
-	}
-	else if (proto == PPPIPV6 && config->ipv6_prefix.s6_addr[0])
-	{
-		session[sid].last_packet = session[sid].last_data = time_now;
-		if (session[sid].walled_garden && !config->cluster_iam_master) { master_forward_pppoe_packet(pack, size, hdr->code); return; }
-		processipv6in(sid, t, pppdata, lppp);
-	}
-	else if (session[sid].ppp.lcp == Opened)
-	{
-		session[sid].last_packet = time_now;
-		if (!config->cluster_iam_master) { master_forward_pppoe_packet(pack, size, hdr->code); return; }
-		protoreject(sid, t, pppdata, lppp, proto);
-	}
-	else
-	{
-		LOG(3, sid, t, "process_pppoe_sess: Unknown PPP protocol 0x%04X received in LCP %s state\n",
-			proto, ppp_state(session[sid].ppp.lcp));
-	}
-#endif
 }
 
 uint8_t *pppoe_session_header(uint8_t *b, const PPPoESession *pppoeSession)

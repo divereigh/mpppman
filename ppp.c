@@ -73,14 +73,14 @@ static void dumplcp(uint8_t *p, int l)
 				{
 					int proto = ntohs(*(uint16_t *)(o + 2));
 					LOG(4, "    %s 0x%x (%s)\n", ppp_lcp_option(type), proto,
-						proto == AUTHPAP  ? "PAP"  : "UNSUPPORTED");
+						proto == PPP_PAP  ? "PAP"  : "UNSUPPORTED");
 				}
 				else if (length == 5)
 				{
 					int proto = ntohs(*(uint16_t *)(o + 2));
 					int algo = *(o + 4);
 					LOG(4, "    %s 0x%x 0x%x (%s)\n", ppp_lcp_option(type), proto, algo,
-						(proto == AUTHCHAP && algo == 5) ? "CHAP MD5"  : "UNSUPPORTED");
+						(proto == PPP_CHAP && algo == 5) ? "CHAP MD5"  : "UNSUPPORTED");
 				}
 				else
 					LOG(4, "    %s odd length %d\n", ppp_lcp_option(type), length);
@@ -140,13 +140,13 @@ static int add_lcp_auth(uint8_t *b, int size, int authtype)
 	if (authtype == AUTHCHAP)
 	{
 		len = *b++ = 5; // length
-		*(uint16_t *) b = htons(AUTHCHAP); b += 2;
+		*(uint16_t *) b = htons(PPP_CHAP); b += 2;
 		*b++ = 5; // MD5
 	}
 	else if (authtype == AUTHPAP)
 	{
 		len = *b++ = 4; // length
-		*(uint16_t *) b = htons(AUTHPAP); b += 2;
+		*(uint16_t *) b = htons(PPP_PAP); b += 2;
 	}
 	else
 	{
@@ -354,3 +354,139 @@ uint8_t *pppoe_makeppp(uint8_t *b, int size, uint8_t *p, int l, const PPPSession
 	return b;
 }
 
+/* Process PAP packet - pack points the PPP payload */
+void processpap(PPPSession *pppSession, uint8_t *pack, int size)
+{
+}
+
+/* Process CHAP packet - pack points the PPP payload */
+void processchap(PPPSession *pppSession, uint8_t *pack, int size)
+{
+}
+
+/* Process LCP packet - pack points the PPP payload */
+void processlcp(PPPSession *pppSession, uint8_t *pack, int size)
+{
+	dumplcp(pack, size);
+}
+
+/* Process IPCP packet - pack points the PPP payload */
+void processipcp(PPPSession *pppSession, uint8_t *pack, int size)
+{
+}
+
+/* Process IPV6CP packet - pack points the PPP payload */
+void processipv6cp(PPPSession *pppSession, uint8_t *pack, int size)
+{
+}
+
+/* Process CCP packet - pack points the PPP payload */
+void processccp(PPPSession *pppSession, uint8_t *pack, int size)
+{
+}
+
+/* Process IP packet - pack points the PPP payload */
+void processip(PPPSession *pppSession, uint8_t *pack, int size)
+{
+}
+
+/* Process MP packet - pack points the PPP payload */
+void processmp(PPPSession *pppSession, uint8_t *pack, int size)
+{
+}
+
+/* Process IPv6 packet - pack points the PPP payload */
+void processipv6(PPPSession *pppSession, uint8_t *pack, int size)
+{
+}
+
+void protoreject(PPPSession *pppSession, uint8_t *pack, int size, uint16_t proto)
+{
+}
+
+/* Process PPP packet - pack points the PPP payload */
+void processPPP(PPPSession *pppSession, uint8_t *pack, int size)
+{
+	uint16_t proto;
+	
+	if (size > 2 && pack[0] == 0xFF && pack[1] == 0x03)
+	{	// HDLC address header, discard
+		LOG(5, "processSession: HDLC address header, discard\n");
+		pack += 2;
+		size -= 2;
+	}
+
+	if (size < 2)
+	{
+		LOG(3, "Error process_pppoe_sess: Short ppp length %d\n", size);
+		return;
+	}
+	if (*pack & 1)
+	{
+		/* No idea what this is - DAI */
+		proto = *pack++;
+		size--;
+	}
+	else
+	{
+		proto = ntohs(*(uint16_t *) pack);
+		pack += 2;
+		size -= 2;
+	}
+
+	if (proto == PPP_PAP)
+	{
+		pppSession->last_packet = time_now;
+		processpap(pppSession, pack, size);
+	}
+	else if (proto == PPP_CHAP)
+	{
+		pppSession->last_packet = time_now;
+		processchap(pppSession, pack, size);
+	}
+	else if (proto == PPP_LCP)
+	{
+		pppSession->last_packet = time_now;
+		processlcp(pppSession, pack, size);
+	}
+	else if (proto == PPP_IPCP)
+	{
+		pppSession->last_packet = time_now;
+		processipcp(pppSession, pack, size);
+	}
+	else if (proto == PPP_IPV6CP)
+	{
+		pppSession->last_packet = time_now;
+		processipv6cp(pppSession, pack, size);
+	}
+	else if (proto == PPP_CCP)
+	{
+		pppSession->last_packet = time_now;
+		processccp(pppSession, pack, size);
+	}
+	else if (proto == PPP_IP)
+	{
+		pppSession->last_packet = pppSession->last_data = time_now;
+		processip(pppSession, pack, size);
+	}
+	else if (proto == PPP_MP)
+	{
+		pppSession->last_packet = pppSession->last_data = time_now;
+		processmp(pppSession, pack, size);
+	}
+	else if (proto == PPP_IPV6)
+	{
+		pppSession->last_packet = pppSession->last_data = time_now;
+		processipv6(pppSession, pack, size);
+	}
+	else if (pppSession->ppp.lcp == Opened)
+	{
+		pppSession->last_packet = time_now;
+		protoreject(pppSession, pack, size, proto);
+	}
+	else
+	{
+		LOG(3, "processPPP: Unknown PPP protocol 0x%04X received in LCP %s state\n",
+			proto, ppp_state(pppSession->ppp.lcp));
+	}
+}

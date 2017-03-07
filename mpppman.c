@@ -76,6 +76,7 @@ int main() {
 	PPPoEInterface *pppoe;
 
 	log_stream=stderr;
+	srand(getpid());
 	base = event_base_new();
 	pppoe=openPPPoEInterface(INTERFACE, 0, 1, base);
 

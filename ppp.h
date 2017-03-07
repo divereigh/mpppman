@@ -91,6 +91,8 @@ typedef struct PPPSessionStruct {
 	uint32_t session_timeout;	// Maximum session time in seconds
 	uint32_t idle_timeout;		// Maximum idle time in seconds
 	in_addr_t dns1, dns2;		// DNS servers
+	time_t last_packet;		// Last packet from the user (used for idle timeouts)
+	time_t last_data;		// Last data packet to/from the user (used for idle timeouts)
 	char user[MAXUSER];		// username for client session
 	char password[MAXPASS];		// password for client session
 
@@ -147,6 +149,7 @@ PPPSession * ppp_new_session(const PPPoESession *pppoeSession);
 uint8_t *pppoe_makeppp(uint8_t *b, int size, uint8_t *p, int l, const PPPSession *pppSession,
 		uint16_t mtype, uint8_t prio, int bid, uint8_t mp_bits);
 void sendlcp(PPPSession *pppSession);
+void processPPP(PPPSession *pppSession, uint8_t *pack, int size);
 
 // increment ConfReq counter and reset timer
 #define restart_timer(_s, _fsm) ({                              \

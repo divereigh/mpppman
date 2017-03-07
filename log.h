@@ -16,11 +16,11 @@
 #ifdef HAVE_NETINET_IN_H
 #include <netinet/in.h>
 #endif
+*/
 
 #ifdef HAVE_ARPA_INET_H
 #include <arpa/inet.h>
 #endif
-*/
 
 void sysFatal(char const *str);
 void sysErr(char const *str);
@@ -36,7 +36,7 @@ void _log_hex(int level, const char *title, const uint8_t *data, int maxsize);
 
 extern int debuglevel;
 extern FILE *log_stream;
-//char *fmtaddr(struct in_addr addr, int n);
+char *fmtaddr(in_addr_t addr, int n);
 char *fmtMacAddr(const uint8_t *pMacAddr);
 
 #endif

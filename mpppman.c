@@ -6,12 +6,6 @@
 #include <string.h>
 #include <time.h>
 
-#include <event2/bufferevent.h>
-#include <event2/buffer.h>
-#include <event2/listener.h>
-#include <event2/util.h>
-#include <event2/event.h>
-
 #ifdef HAVE_UNISTD_H
 #include <unistd.h>
 #endif
@@ -52,6 +46,7 @@
 
 #include "log.h"
 #include "pppoe.h"
+#include "event.h"
 
 #define INTERFACE "vlan50"
 int debuglevel=4;
@@ -70,20 +65,19 @@ void cb_func(evutil_socket_t fd, short what, void *arg)
 }
 
 int main() {
-	struct event_base *base;
 	struct event *ev1, *ev2;
 	struct timeval five_seconds = {5,0};
 	PPPoEInterface *pppoe;
 
 	log_stream=stderr;
 	srand(getpid());
-	base = event_base_new();
-	pppoe=openPPPoEInterface(INTERFACE, 0, 1, base);
+	initEvent();
+	pppoe=openPPPoEInterface(INTERFACE, 0, 1);
 
 	// ev1=event_new(base, pppoe->discoverySock, EV_TIMEOUT|EV_READ|EV_PERSIST, cb_func, (char *) "Reading event");
 	// ev1=event_new(base, 0, EV_TIMEOUT, cb_func, (char *) "Reading event");
 
 	// event_add(ev1, &five_seconds);
-	event_base_dispatch(base);
+	dispatchEvent();
 }
 

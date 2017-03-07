@@ -1,3 +1,5 @@
+#ifndef __PPP_H
+#define __PPP_H
 #include "config.h"
 
 #ifdef HAVE_STDINT_H
@@ -12,6 +14,10 @@
 #define MAXPASS         128             // password
 #define MAX_PPP_SESSION 20		// Max PPP sessions
 #define PPPoE_MRU       1492            // maximum PPPoE MRU (rfc2516: 1500 less PPPoE header (6) and PPP protocol ID (2))
+#define MAXMTU		2600		// arbitrary maximum MTU
+#define MAXETHER	(MAXMTU+18)	// max packet we try sending to tunnel
+#define MINMTU		576		// minimum recommended MTU (rfc1063)
+#define MAXADDRESS      20              // Maximum length for the Endpoint Discrminiator address
 #define AUTHPAP         1       // allow PAP
 #define AUTHCHAP        2       // allow CHAP
 
@@ -34,8 +40,14 @@
 typedef uint32_t clockt;
 
 extern int ppp_restart_time;
+extern int ppp_max_failure;
+extern int ppp_max_configure;
+extern int radius_authtypes;
+extern int radius_authprefer;
+extern int MRU;
 
 #include "pppoe.h"
+#include "event.h"
 
 // PPP phases
 enum {
@@ -70,6 +82,12 @@ enum
         PSNDN,
 };
 
+typedef struct {
+	uint8_t length;                 // Endpoint Discriminator length
+	uint8_t addr_class;             // Endpoint Discriminator class
+	uint8_t address[MAXADDRESS];    // Endpoint Discriminator address
+} epdist;
+
 typedef struct PPPSessionStruct {
 	const PPPoESession *pppoeSession; // Match PPPoESession
 	struct {
@@ -96,8 +114,16 @@ typedef struct PPPSessionStruct {
 	char user[MAXUSER];		// username for client session
 	char password[MAXPASS];		// password for client session
 
+	// Remote settings
+	uint32_t mrru;                  // Multilink Max-Receive-Reconstructed-Unit
+	epdist epdis;                   // Multilink Endpoint Discriminator
+//	bundleidt bundle;               // Multilink Bundle Identifier
+	uint8_t mssf;                   // Multilink Short Sequence Number Header Format
+
 	// PPP restart timer/counters
-	struct {
+	struct cpStruct {
+		struct event *timerEvent;	// Event for restarts/retrys etc
+		struct PPPSessionStruct *pppSession;
 		time_t restart;
 		int conf_sent;
 		int nak_sent;
@@ -144,28 +170,31 @@ typedef struct PPPSessionStruct {
 	uint64_t prev_time;
 } PPPSession;
 
-// PPPSession *ppp_find_session(uint16_t sid);
-PPPSession * ppp_new_session(const PPPoESession *pppoeSession);
-uint8_t *pppoe_makeppp(uint8_t *b, int size, uint8_t *p, int l, const PPPSession *pppSession,
-		uint16_t mtype, uint8_t prio, int bid, uint8_t mp_bits);
-void sendlcp(PPPSession *pppSession);
-void processPPP(PPPSession *pppSession, uint8_t *pack, int size);
-
 // increment ConfReq counter and reset timer
 #define restart_timer(_s, _fsm) ({                              \
-        _s->_fsm.conf_sent++;                        \
-        _s->_fsm.restart =                           \
-                time_now + ppp_restart_time;            \
+        _s->_fsm.conf_sent++;                        		\
+	startTimer(_s->_fsm.timerEvent, ppp_restart_time);	\
+        _s->_fsm.restart =                          		\
+                time_now + ppp_restart_time;            	\
 })
 
 // reset state machine counters
 #define initialise_restart_count(_s, _fsm)			\
-	_s->_fsm.conf_sent =				\
+	_s->_fsm.conf_sent =					\
 	_s->_fsm.nak_sent = 0
+
+// no more attempts
+#define zero_restart_count(_s, _fsm) ({				\
+	_s->_fsm.conf_sent =					\
+		ppp_max_configure;				\
+	startTimer(_s->_fsm.timerEvent, ppp_restart_time);	\
+	_s->_fsm.restart =					\
+		time_now + ppp_restart_time;			\
+})
 
 // stop timer on change to state where timer does not run
 #define change_state(_s, _fsm, _new) ({				\
-	if (_new != _s->ppp._fsm)			\
+	if (_new != _s->ppp._fsm)				\
 	{ 							\
 		switch (_new)					\
 		{						\
@@ -174,7 +203,8 @@ void processPPP(PPPSession *pppSession, uint8_t *pack, int size);
 		case Closed:					\
 		case Stopped:					\
 		case Opened:					\
-			_s->_fsm.restart = 0;	\
+			_s->_fsm.restart = 0;			\
+			stopTimer(_s->_fsm.timerEvent);		\
 			initialise_restart_count(_s, _fsm);	\
 			break;					\
 		default:					\
@@ -184,3 +214,11 @@ void processPPP(PPPSession *pppSession, uint8_t *pack, int size);
 	}							\
 })
 
+PPPSession * ppp_new_session(const PPPoESession *pppoeSession);
+uint8_t *pppoe_makeppp(uint8_t *b, int size, uint8_t *p, int l, const PPPSession *pppSession,
+		uint16_t mtype, uint8_t prio, int bid, uint8_t mp_bits);
+void sendlcp(PPPSession *pppSession);
+void processPPP(PPPSession *pppSession, uint8_t *pack, int size);
+void sessionshutdown(PPPSession *pppSession, char const *reason);
+
+#endif

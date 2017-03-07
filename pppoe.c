@@ -12,6 +12,10 @@
 #include <string.h>
 #endif
 
+#ifdef HAVE_TIME_H
+#include <time.h>
+#endif
+
 #ifdef HAVE_ERRNO_H
 #include <errno.h>
 #endif
@@ -41,6 +45,9 @@
 #include "pppoe.h"
 #include "ppp.h"
 #include "md5.h"
+#include "lcp.h"
+#include "common.h"
+#include "event.h"
 
 
 #define SESS_CODE           0x00
@@ -116,6 +123,7 @@ void PPPoE_cb_func(evutil_socket_t fd, short what, void *arg)
 		(what&EV_WRITE)   ? " write" : "",
 		(what&EV_SIGNAL)  ? " signal" : "",
 		pppoe->name);
+	time(&time_now);
 	if ((s = read(fd, buf, sizeof(buf))) > 0) {
 		if (fd==pppoe->discoverySock) {
 			processDiscovery(pppoe, buf, s);
@@ -165,15 +173,15 @@ PPPoESession * pppoe_new_session(const PPPoEInterface *iface, const uint8_t *add
 *%FUNCTION: openPPPoEInterface
 *%ARGUMENTS:
 * ifname -- name of interface
-* clientOK -- true if this interface should relay PADI, PADR packets.
-* acOK -- true if this interface should relay PADO, PADS packets.
+* clientOK -- true if this interface should accept PADI, PADR packets.
+* acOK -- true if this interface should accept PADO, PADS packets.
 *%RETURNS:
 * A PPPoEInterface with discovery and session sockets open
 *%DESCRIPTION:
 * Opens a PPPoE Interface
 ***********************************************************************/
 PPPoEInterface *
-openPPPoEInterface(char const *ifname, int clientOK, int acOK, struct event_base *base)
+openPPPoEInterface(char const *ifname, int clientOK, int acOK)
 {
 	PPPoEInterface *pppoe;
 
@@ -187,11 +195,9 @@ openPPPoEInterface(char const *ifname, int clientOK, int acOK, struct event_base
 	pppoe->acOK=acOK;
 	strncpy(pppoe->name, ifname, sizeof(pppoe->name));
 
-	pppoe->discoveryEvent=event_new(base, pppoe->discoverySock, EV_READ|EV_PERSIST, PPPoE_cb_func, (void *) pppoe);
-	pppoe->sessionEvent=event_new(base, pppoe->sessionSock, EV_READ|EV_PERSIST, PPPoE_cb_func, (void *) pppoe);
+	pppoe->discoveryEvent=eventSocket(pppoe->discoverySock, PPPoE_cb_func, (void *) pppoe);
+	pppoe->sessionEvent=eventSocket(pppoe->sessionSock, PPPoE_cb_func, (void *) pppoe);
 
-	event_add(pppoe->discoveryEvent, NULL);
-	event_add(pppoe->sessionEvent, NULL);
 	return(pppoe);
 }
 
@@ -587,7 +593,7 @@ TODO
 #endif
 	pppoe_send_PADS(iface, pppoeSession->sid, ethhdr->h_source, host_uniq_tag, relay_sid_tag, service_name_tag);
 
-	sendlcp(pppoeSession->pppSession);
+	sendLCPConfigReq(pppoeSession->pppSession);
 	change_state(pppoeSession->pppSession, lcp, RequestSent);
 }
 

@@ -14,11 +14,6 @@
 #include <netinet/if_ether.h>
 #endif
 
-#include <event2/bufferevent.h>
-#include <event2/buffer.h>
-#include <event2/listener.h>
-#include <event2/util.h>
-#include <event2/event.h>
 
 // For MD5 results
 typedef uint8_t hasht[16];
@@ -46,7 +41,7 @@ typedef struct PPPoESessionStruct {
 	PPPSession *pppSession;			/* Matching PPP Session */
 } PPPoESession;
 
-PPPoEInterface * openPPPoEInterface(char const *ifname, int clientOK, int acOK, struct event_base *);
+PPPoEInterface * openPPPoEInterface(char const *ifname, int clientOK, int acOK);
 void processSession(const PPPoEInterface *iface, uint8_t *pack, int size);
 void processDiscovery(const PPPoEInterface *iface, uint8_t *pack, int size);
 void pppoe_sess_send(const PPPoESession *pppoeSession, const uint8_t *pack, uint16_t l);

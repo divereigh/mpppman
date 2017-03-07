@@ -174,10 +174,9 @@ void _log_hex(int level, const char *title, const uint8_t *data, int maxsize)
 	}
 }
 
-#if 0
 // format ipv4 addr as a dotted-quad; n chooses one of 4 static buffers
 // to use
-char *fmtaddr(struct in_addr addr, int n)
+char *fmtaddr(in_addr_t addr, int n)
 {
     static char addrs[4][16];
     struct in_addr in;
@@ -185,9 +184,9 @@ char *fmtaddr(struct in_addr addr, int n)
     if (n < 0 || n >= 4)
 	return "";
 
-    return strcpy(addrs[n], inet_ntoa(addr));
+    in.s_addr=addr;
+    return strcpy(addrs[n], inet_ntoa(in));
 }
-#endif
 
 char *fmtMacAddr(const uint8_t *pMacAddr)
 {

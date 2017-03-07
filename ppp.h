@@ -71,10 +71,7 @@ enum
 };
 
 typedef struct PPPSessionStruct {
-	unsigned int epoch;			/* Epoch when last activity was seen */
-	uint16_t sesNum;			/* Session number */
-	PPPoEInterface const *iface;		/* Interface */
-	unsigned char peerMac[ETH_ALEN];	/* Peer's MAC address */
+	const PPPoESession *pppoeSession; // Match PPPoESession
 	struct {
 		uint8_t phase;          // PPP phase
 		uint8_t lcp:4;          //   LCP    state
@@ -145,8 +142,8 @@ typedef struct PPPSessionStruct {
 	uint64_t prev_time;
 } PPPSession;
 
-PPPSession *ppp_find_session(uint16_t sid);
-PPPSession * ppp_new_session(const PPPoEInterface *iface, const uint8_t *addr);
+// PPPSession *ppp_find_session(uint16_t sid);
+PPPSession * ppp_new_session(const PPPoESession *pppoeSession);
 uint8_t *pppoe_makeppp(uint8_t *b, int size, uint8_t *p, int l, const PPPSession *pppSession,
 		uint16_t mtype, uint8_t prio, int bid, uint8_t mp_bits);
 void sendlcp(PPPSession *pppSession);

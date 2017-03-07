@@ -16,22 +16,6 @@
 #include <net/if.h>
 #endif
 
-#ifdef HAVE_ARPA_INET_H
-#include <arpa/inet.h>
-#endif
-
-#ifdef HAVE_NETINET_IF_ETHER_H
-#include <netinet/if_ether.h>
-#endif
-
-#ifdef HAVE_NET_ETHERNET_H
-#include <net/ethernet.h>
-#endif
-
-#ifdef HAVE_LINUX_IF_PPPOX_H
-#include <linux/if_pppox.h>
-#endif
-
 #include "common.h"
 #include "log.h"
 #include "ppp.h"
@@ -119,6 +103,23 @@ static void dumplcp(uint8_t *p, int l)
 			case 7: // Protocol-Field-Compression
 			case 8: // Address-And-Control-Field-Compression
 				LOG(4, "    %s\n", ppp_lcp_option(type));
+				break;
+			case 17: // Multilink Max-Receive-Reconstructed-Unit
+				{
+					int mrru = ntohs(*(uint16_t *)(o + 2));
+					LOG(4, "    %s %d\n", ppp_lcp_option(type), mrru);
+				}
+				break;
+			case 19: // Multilink Max-Receive-Reconstructed-Unit
+				{
+					int ep_type=o[2];
+					if (ep_type==IPADDR) {
+						struct in_addr *ipaddr = (struct in_addr *)(o + 3);
+						LOG(4, "    %s ipaddr: %s\n", ppp_lcp_option(type), inet_ntoa(*ipaddr));
+					} else {
+						LOG(4, "    %s unknown: %d\n", ppp_lcp_option(type), ep_type);
+					}
+				}
 				break;
 			default:
 				LOG(2, "    Unknown PPP LCP Option type %d\n", type);
@@ -210,18 +211,18 @@ void sendlcp(PPPSession *pppSession)
 	LOG_HEX(5, "PPPLCP", q, l - q);
 	if (debuglevel > 3) dumplcp(q, l - q);
 
-	pppoe_sess_send(pppSession->iface, b, (l - b));
+	pppoe_sess_send(pppSession->pppoeSession, b, (l - b));
 	restart_timer(pppSession, lcp);
 }
 
 /* Find a session that has the given session id, 0 will find a free session
 */
-PPPSession *ppp_find_session(uint16_t sid)
+PPPSession *ppp_find_free_session()
 {
 	int i;
 
-	for (i=0; i<MAX_PPPOE_SESSION; i++) {
-		if (ppp_sessions[i].sesNum==sid) {
+	for (i=0; i<MAX_PPP_SESSION; i++) {
+		if (ppp_sessions[i].pppoeSession==NULL) {
 			return(&ppp_sessions[i]);
 		}
 	}
@@ -229,23 +230,17 @@ PPPSession *ppp_find_session(uint16_t sid)
 }
 
 /* Allocate and fill new session - returns PPPSession */
-PPPSession * ppp_new_session(const PPPoEInterface *iface, const uint8_t *addr)
+PPPSession * ppp_new_session(const PPPoESession *pppoeSession)
 {
 	uint16_t sid;
 	int i;
 	PPPSession *pppSession;
 
-	if ((pppSession=ppp_find_session(0)) == NULL) {
+	if ((pppSession=ppp_find_free_session()) == NULL) {
 		LOG(0, "No free PPPSession available\n");
 	}
 	
-	do {
-		sid=random() & 0xffff; // Lower 16 bits
-	} while(ppp_find_session(sid)!=NULL);
-
-	pppSession->sesNum=sid;
-	pppSession->iface=iface;
-	memcpy(pppSession->peerMac, addr, ETH_ALEN);
+	pppSession->pppoeSession=pppoeSession;
 
 	// session[sid].opened = time_now;
 	// session[sid].last_packet = session[sid].last_data = time_now;
@@ -282,7 +277,8 @@ uint8_t *pppoe_makeppp(uint8_t *b, int size, uint8_t *p, int l, const PPPSession
 {
 	uint16_t type = mtype;
 	uint8_t *start = b;
-	struct pppoe_hdr *hdr = (struct pppoe_hdr *)(b + ETH_HLEN);
+	uint8_t *pppoe_hdr = b + ETH_HLEN;
+	//struct pppoe_hdr *hdr = (struct pppoe_hdr *)(b + ETH_HLEN);
 
 	if (size < 28) // Need more space than this!!
 	{
@@ -291,7 +287,7 @@ uint8_t *pppoe_makeppp(uint8_t *b, int size, uint8_t *p, int l, const PPPSession
 	}
 
 	// 14 bytes ethernet Header + 6 bytes header pppoe
-	b= pppoe_session_header(b, pppSession->iface, pppSession->peerMac, pppSession->sesNum);
+	b= pppoe_session_header(b, pppSession->pppoeSession);
 
 	// Check whether this session is part of multilink
 #if 0
@@ -306,7 +302,7 @@ uint8_t *pppoe_makeppp(uint8_t *b, int size, uint8_t *p, int l, const PPPSession
 
 	*(uint16_t *) b = htons(type);
 	b += 2;
-	hdr->length += 2;
+	pppoe_incr_header_length(pppoe_hdr, 2);
 
 #if 0
 	if (bid)
@@ -318,7 +314,7 @@ uint8_t *pppoe_makeppp(uint8_t *b, int size, uint8_t *p, int l, const PPPSession
 			uint16_t bits_send = mp_bits;
 			*(uint16_t *) b = htons((bundle[bid].seq_num_t & 0x0FFF)|bits_send);
 			b += 2;
-			hdr->length += 2;
+			pppoe_incr_header_length(pppoe_hdr, 2);
 		}
 		else
 		{
@@ -326,7 +322,7 @@ uint8_t *pppoe_makeppp(uint8_t *b, int size, uint8_t *p, int l, const PPPSession
 			// Set the multilink bits
 			*b = mp_bits;
 			b += 4;
-			hdr->length += 4;
+			pppoe_incr_header_length(pppoe_hdr, 4);
 		}
 
 		bundle[bid].seq_num_t++;
@@ -337,7 +333,7 @@ uint8_t *pppoe_makeppp(uint8_t *b, int size, uint8_t *p, int l, const PPPSession
 			//*b++ = mtype; // The next two lines are instead of this 
 			*(uint16_t *) b = htons(mtype); // Message type
 			b += 2;
-			hdr->length += 2;
+			pppoe_incr_header_length(pppoe_hdr, 2);
 		}
 	}
 #endif
@@ -352,7 +348,7 @@ uint8_t *pppoe_makeppp(uint8_t *b, int size, uint8_t *p, int l, const PPPSession
 	if (p && l)
 	{
 		memcpy(b, p, l);
-		hdr->length += l;
+		pppoe_incr_header_length(pppoe_hdr, l);
 	}
 
 	return b;

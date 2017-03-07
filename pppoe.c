@@ -46,6 +46,8 @@
 #define SESS_CODE           0x00
 #define DEFAULT_PPPOE_AC_NAME "mpppman"
 
+PPPoESession pppoe_sessions[MAX_PPPOE_SESSION];
+
 static uint8_t bc_addr[ETH_ALEN] = {0xff, 0xff, 0xff, 0xff, 0xff, 0xff};
 
 static char *code_pad[] = {
@@ -121,6 +123,42 @@ void PPPoE_cb_func(evutil_socket_t fd, short what, void *arg)
 			processSession(pppoe, buf, s);
 		}
 	}
+}
+
+/* Find a session that has the given session id, 0 will find a free session
+*/
+PPPoESession *pppoe_find_session(uint16_t sid)
+{
+	int i;
+
+	for (i=0; i<MAX_PPPOE_SESSION; i++) {
+		if (pppoe_sessions[i].sid==sid) {
+			return(&pppoe_sessions[i]);
+		}
+	}
+	return(NULL);
+}
+
+/* Allocate and fill new session - returns PPPoESession */
+PPPoESession * pppoe_new_session(const PPPoEInterface *iface, const uint8_t *addr)
+{
+	uint16_t sid;
+	int i;
+	PPPoESession *pppoeSession;
+
+	if ((pppoeSession=pppoe_find_session(0)) == NULL) {
+		LOG(0, "No free PPPoESession available\n");
+	}
+	
+	do {
+		sid=random() & 0xffff; // Lower 16 bits
+	} while(pppoe_find_session(sid)!=NULL);
+
+	pppoeSession->sid=sid;
+	pppoeSession->iface=iface;
+	memcpy(pppoeSession->peerMac, addr, ETH_ALEN);
+	LOG(3, "PPPoESession allocated with sid=%04x\n", pppoeSession->sid);
+	return(pppoeSession);
 }
 
 /**********************************************************************
@@ -272,7 +310,7 @@ static void pppoe_send_err(const PPPoEInterface *iface, const uint8_t *addr, con
 	pppoe_disc_send(iface, pack);
 }
 
-void pppoe_sess_send(const PPPoEInterface *iface, const uint8_t *pack, uint16_t l)
+void pppoe_sess_send(const PPPoESession *pppoeSession, const uint8_t *pack, uint16_t l)
 {
 	struct pppoe_hdr *hdr = (struct pppoe_hdr *)(pack + ETH_HLEN);
 	int n;
@@ -290,7 +328,7 @@ void pppoe_sess_send(const PPPoEInterface *iface, const uint8_t *pack, uint16_t 
 
 	LOG_HEX(5, "pppoe_sess_send", pack, l);
 
-	n = write(iface->sessionSock, pack, l);
+	n = write(pppoeSession->iface->sessionSock, pack, l);
 	if (n < 0 )
 		LOG(0, "pppoe_sess_send: write: %s\n", strerror(errno));
 	else if (n != l)
@@ -421,7 +459,7 @@ static void pppoe_recv_PADR(const PPPoEInterface *iface, uint8_t *pack, int size
 	struct pppoe_tag *ac_cookie_tag = NULL;
 	struct pppoe_tag *service_name_tag = NULL;
 	int n, service_match = 0;
-	PPPSession *pppSession;
+	PPPoESession *pppoeSession;
 	uint16_t sid;
 
 	if (!memcmp(ethhdr->h_dest, bc_addr, ETH_ALEN))
@@ -500,7 +538,8 @@ TODO
 		return;
 	}
 
-	pppSession=ppp_new_session(iface, ethhdr->h_source);
+	pppoeSession=pppoe_new_session(iface, ethhdr->h_source);
+	pppoeSession->pppSession=ppp_new_session(pppoeSession);
 #if 0
 	sid = sessionfree;
 	sessionfree = session[sid].next;
@@ -532,10 +571,10 @@ TODO
 
 	memcpy(session[sid].src_hwaddr, ethhdr->h_source, ETH_ALEN);
 #endif
-	pppoe_send_PADS(iface, pppSession->sesNum, ethhdr->h_source, host_uniq_tag, relay_sid_tag, service_name_tag);
+	pppoe_send_PADS(iface, pppoeSession->sid, ethhdr->h_source, host_uniq_tag, relay_sid_tag, service_name_tag);
 
-	sendlcp(pppSession);
-	change_state(pppSession, lcp, RequestSent);
+	sendlcp(pppoeSession->pppSession);
+	change_state(pppoeSession->pppSession, lcp, RequestSent);
 }
 
 
@@ -617,9 +656,9 @@ void processSession(const PPPoEInterface *iface, uint8_t *pack, int size)
 	uint16_t lppp = ntohs(hdr->length);
 	uint8_t *pppdata = (uint8_t *) hdr->tag;
 	uint16_t proto, sid, t;
+	int doclient=0;
 
-	t = TUNNEL_ID_PPPOE;
-	if (config->pppoe_client) {
+	if (doclient) {
 		sid = pppoe_local_sid;
 		if (pppoe_remote_sid!=ntohs(hdr->sid)) {
 			LOG(0, sid, t, "Received pppoe packet with invalid session ID\n");
@@ -754,8 +793,15 @@ void processSession(const PPPoEInterface *iface, uint8_t *pack, int size)
 #endif
 }
 
-uint8_t *pppoe_session_header(uint8_t *b, const PPPoEInterface *iface, const uint8_t *dst, uint16_t sid)
+uint8_t *pppoe_session_header(uint8_t *b, const PPPoESession *pppoeSession)
 {
-	return(setup_header(b, iface->mac, dst, SESS_CODE, sid, ETH_P_PPP_SES));
+	return(setup_header(b, pppoeSession->iface->mac, pppoeSession->peerMac, SESS_CODE, pppoeSession->sid, ETH_P_PPP_SES));
+}
+
+// Increment pppoe header length - saving upper levels digging into structure
+void pppoe_incr_header_length(uint8_t *b, int n)
+{
+	struct pppoe_hdr *hdr = (struct pppoe_hdr *) b;
+	hdr->length += n;
 }
 

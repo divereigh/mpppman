@@ -25,6 +25,8 @@ typedef uint8_t hasht[16];
 
 #define MAX_PPPOE_SESSION 10
 
+typedef struct PPPSessionStruct PPPSession;
+
 typedef struct InterfaceStruct {
 	char name[IFNAMSIZ+1];		/* Interface name */
 	int discoverySock;		/* Socket for discovery frames */
@@ -36,9 +38,18 @@ typedef struct InterfaceStruct {
 	unsigned char mac[ETH_ALEN];	/* MAC address */
 } PPPoEInterface;
 
+typedef struct PPPoESessionStruct {
+	unsigned int epoch;			/* Epoch when last activity was seen */
+	uint16_t sid;				/* Session number */
+	PPPoEInterface const *iface;		/* Interface */
+	unsigned char peerMac[ETH_ALEN];	/* Peer's MAC address */
+	PPPSession *pppSession;			/* Matching PPP Session */
+} PPPoESession;
+
 PPPoEInterface * openPPPoEInterface(char const *ifname, int clientOK, int acOK, struct event_base *);
 void processSession(const PPPoEInterface *iface, uint8_t *pack, int size);
 void processDiscovery(const PPPoEInterface *iface, uint8_t *pack, int size);
-void pppoe_sess_send(const PPPoEInterface *iface, const uint8_t *pack, uint16_t l);
-uint8_t *pppoe_session_header(uint8_t *b, const PPPoEInterface *iface, const uint8_t *dst, uint16_t sid);
+void pppoe_sess_send(const PPPoESession *pppoeSession, const uint8_t *pack, uint16_t l);
+uint8_t *pppoe_session_header(uint8_t *b, const PPPoESession *pppoeSession);
+void pppoe_incr_header_length(uint8_t *b, int n);
 #endif

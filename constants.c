@@ -185,7 +185,11 @@ CONSTANT(ppp_lcp_option,
     "Magic-Number",					// 5
     0,							// 6
     "Protocol-Field-Compression",			// 7
-    "Address-and-Control-Field-Compression"		// 8
+    "Address-and-Control-Field-Compression",		// 8
+    0,0,0,0,0,0,0,0,					// 9-16
+    "Multilink Max-Receive-Reconstructed-Unit",		// 17
+    0,							// 18
+    "Multilink Endpoint Discriminator"			// 19
 )
 
 CONSTANT(radius_state,

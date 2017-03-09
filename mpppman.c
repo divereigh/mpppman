@@ -75,6 +75,11 @@ void discovery_cb(PPPoESession *pppoeSession, int action)
 		change_state(pppoeSession->pppSession, lcp, RequestSent);
 
 		discoveryClient(pppoeSession->iface, NULL, NULL, 10);
+	} else {
+		LOG(3, "discover client session started %s/%s\n", pppoeSession->ac_name, pppoeSession->service_name);
+		pppoeSession->pppSession=ppp_new_session(pppoeSession);
+		// sendLCPConfigReq(pppoeSession->pppSession);
+		// change_state(pppoeSession->pppSession, lcp, RequestSent);
 	}
 }
 

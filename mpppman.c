@@ -47,6 +47,8 @@
 #include "log.h"
 #include "pppoe.h"
 #include "event.h"
+#include "ppp.h"
+#include "lcp.h"
 
 #define INTERFACE "vlan50"
 int debuglevel=4;
@@ -64,6 +66,18 @@ void cb_func(evutil_socket_t fd, short what, void *arg)
 		data);
 }
 
+void discovery_cb(PPPoESession *pppoeSession, int action)
+{
+	if (pppoeSession->server) {
+		LOG(3, "discover server session started %s/%s\n", pppoeSession->ac_name, pppoeSession->service_name);
+		pppoeSession->pppSession=ppp_new_session(pppoeSession);
+		sendLCPConfigReq(pppoeSession->pppSession);
+		change_state(pppoeSession->pppSession, lcp, RequestSent);
+
+		discoveryClient(pppoeSession->iface, NULL, NULL, 10);
+	}
+}
+
 int main() {
 	struct event *ev1, *ev2;
 	struct timeval five_seconds = {5,0};
@@ -72,7 +86,9 @@ int main() {
 	log_stream=stderr;
 	srand(getpid());
 	initEvent();
-	pppoe=openPPPoEInterface(INTERFACE, 0, 1);
+	pppoe=openPPPoEInterface(INTERFACE, discovery_cb);
+	//discoveryServer(pppoe, NULL, NULL);
+	discoveryClient(pppoe, NULL, NULL, 10);
 
 	// ev1=event_new(base, pppoe->discoverySock, EV_TIMEOUT|EV_READ|EV_PERSIST, cb_func, (char *) "Reading event");
 	// ev1=event_new(base, 0, EV_TIMEOUT, cb_func, (char *) "Reading event");

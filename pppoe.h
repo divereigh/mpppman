@@ -14,6 +14,9 @@
 #include <netinet/if_ether.h>
 #endif
 
+typedef struct PPPoESessionStruct PPPoESession;
+
+typedef void (*discovery_cb_func)(PPPoESession *, int);
 
 // For MD5 results
 typedef uint8_t hasht[16];
@@ -30,21 +33,32 @@ typedef struct InterfaceStruct {
 	int acOK;			/* AC replies allowed (PADO, PADS) */
 	struct event *discoveryEvent;	/* Event for packet to be read */
 	struct event *sessionEvent;	/* Event for packet to be read */
+	discovery_cb_func discovery_cb;	/* Function called on successful/teardown discovery */
 	unsigned char mac[ETH_ALEN];	/* MAC address */
+	char server_ac_name[64];	/* Server AC name */
+	char server_service_name[64];	/* Service name to match against client */
+	char client_ac_name[64];	/* AC name to match against server */
+	char client_service_name[64];	/* Service name to send to server */
+	struct event *timerEvent;	/* Timer event */
 } PPPoEInterface;
 
-typedef struct PPPoESessionStruct {
+struct PPPoESessionStruct {
 	unsigned int epoch;			/* Epoch when last activity was seen */
 	uint16_t sid;				/* Session number */
-	PPPoEInterface const *iface;		/* Interface */
+	const PPPoEInterface *iface;			/* Interface */
 	unsigned char peerMac[ETH_ALEN];	/* Peer's MAC address */
 	PPPSession *pppSession;			/* Matching PPP Session */
-} PPPoESession;
+	int server;				/* True if this we are a server */
+	char ac_name[64];			/* Server AC name */
+	char service_name[64];			/* Service name */
+};
 
-PPPoEInterface * openPPPoEInterface(char const *ifname, int clientOK, int acOK);
+PPPoEInterface * openPPPoEInterface(char const *ifname, discovery_cb_func cb);
 void processSession(const PPPoEInterface *iface, uint8_t *pack, int size);
 void processDiscovery(const PPPoEInterface *iface, uint8_t *pack, int size);
 void pppoe_sess_send(const PPPoESession *pppoeSession, const uint8_t *pack, uint16_t l);
 uint8_t *pppoe_session_header(uint8_t *b, const PPPoESession *pppoeSession);
 void pppoe_incr_header_length(uint8_t *b, int n);
+void discoveryServer(PPPoEInterface *iface, char *ac_name, char *service_name);
+void discoveryClient(PPPoEInterface *iface, char *ac_name, char *service_name, int attempts);
 #endif

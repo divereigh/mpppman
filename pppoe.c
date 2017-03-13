@@ -56,6 +56,7 @@
 PPPoESession pppoe_sessions[MAX_PPPOE_SESSION];
 
 static uint8_t bc_addr[ETH_ALEN] = {0xff, 0xff, 0xff, 0xff, 0xff, 0xff};
+static uint8_t mt_addr[ETH_ALEN] = {0x00, 0x00, 0x00, 0x00, 0x00, 0x00};
 
 static char *code_pad[] = {
 	"PADI",
@@ -116,7 +117,8 @@ void PPPoE_cb_func(evutil_socket_t fd, short what, void *arg)
 	int s;
 	const PPPoEInterface *pppoe = (PPPoEInterface *) arg;
 
-	LOG(3, "Got an event on socket %d:%s%s%s%s %s\n",
+	LOG(3, NULL, "===========================================\n");
+	LOG(3, NULL, "Got an event on socket %d:%s%s%s%s %s\n",
 		(int) fd,
 		(what&EV_TIMEOUT) ? " timeout" : "",
 		(what&EV_READ)    ? " read" : "",
@@ -156,7 +158,7 @@ PPPoESession * pppoe_new_session(const PPPoEInterface *iface, const uint8_t *add
 		memset(pppoeSession, 0, sizeof(PPPoESession));
 	} else {
 		if ((pppoeSession=pppoe_find_session(0, NULL)) == NULL) {
-			LOG(0, "No free PPPoESession available\n");
+			LOG(0, NULL, "No free PPPoESession available\n");
 		}
 	}
 	
@@ -169,7 +171,7 @@ PPPoESession * pppoe_new_session(const PPPoEInterface *iface, const uint8_t *add
 	pppoeSession->sid=sid;
 	pppoeSession->iface=iface;
 	memcpy(pppoeSession->peerMac, addr, ETH_ALEN);
-	LOG(3, "PPPoESession allocated with sid=0x%04x\n", pppoeSession->sid);
+	LOG(3, pppoeSession, "PPPoESession allocated with sid=0x%04x\n", pppoeSession->sid);
 	return(pppoeSession);
 }
 
@@ -289,6 +291,31 @@ static void add_ac_name_tag(uint8_t *pack, const char *ac_name)
 }
 
 static void pppoe_recv_PADT(const PPPoEInterface *iface, uint8_t *pack, int size) {
+	struct ethhdr *ethhdr = (struct ethhdr *)pack;
+	struct pppoe_hdr *hdr = (struct pppoe_hdr *)(pack + ETH_HLEN);
+	uint16_t sid;
+	PPPoESession *pppoeSession;
+
+	sid = ntohs(hdr->sid);
+
+	if (!memcmp(ethhdr->h_dest, bc_addr, ETH_ALEN))
+	{
+		LOG(3, NULL, "pppoe: discard PADT (destination address is broadcast)\n");
+		return;
+	}
+
+	if ((pppoeSession=pppoe_find_session(sid, ethhdr->h_source))==NULL)
+	{
+		LOG(3, NULL, "Received PADT packet with unknown session ID (0x%04x) - ignoring\n", sid);
+		return;
+	}
+
+	LOG(2, pppoeSession, "Received PADT - shutdown session\n");
+	if (pppoeSession->pppSession) {
+		sessionshutdown(pppoeSession->pppSession, 0, "Received PADT");
+	} else {
+		pppoe_sessionkill(pppoeSession);
+	}
 }
 
 static void pppoe_disc_send(const PPPoEInterface *iface, const uint8_t *pack)
@@ -299,14 +326,14 @@ static void pppoe_disc_send(const PPPoEInterface *iface, const uint8_t *pack)
 
 	s = ETH_HLEN + sizeof(*hdr) + ntohs(hdr->length);
 
-	LOG(3, "SENT pppoe_disc: Code %s to %s\n", get_string_codepad(hdr->code), fmtMacAddr(ethhdr->h_dest));
-	LOG_HEX(5, "pppoe_disc_send", pack, s);
+	LOG(3, NULL, "SENT pppoe_disc: Code %s to %s\n", get_string_codepad(hdr->code), fmtMacAddr(ethhdr->h_dest));
+	LOG_HEX(5, NULL, "pppoe_disc_send", pack, s);
 
 	n = write(iface->discoverySock, pack, s);
 	if (n < 0 )
-		LOG(0, "pppoe: write: %s\n", strerror(errno));
+		LOG(0, NULL, "pppoe: write: %s\n", strerror(errno));
 	else if (n != s) {
-		LOG(0, "pppoe: short write %i/%i\n", n,s);
+		LOG(0, NULL, "pppoe: short write %i/%i\n", n,s);
 	}
 }
 
@@ -336,7 +363,7 @@ void pppoe_sess_send(const PPPoESession *pppoeSession, const uint8_t *pack, uint
 
 	if (l < (ETH_HLEN + sizeof(*hdr) + 3))
 	{
-		LOG(0, "ERROR pppoe_sess_send: packet too small for pppoe sent (size=%d)\n", l);
+		LOG(0, pppoeSession, "ERROR pppoe_sess_send: packet too small for pppoe sent (size=%d)\n", l);
 		return;
 	}
 
@@ -344,13 +371,13 @@ void pppoe_sess_send(const PPPoESession *pppoeSession, const uint8_t *pack, uint
 	sizeppp = l - (ETH_HLEN + sizeof(*hdr));
 	hdr->length = htons(sizeppp);
 
-	LOG_HEX(5, "pppoe_sess_send", pack, l);
+	LOG_HEX(5, pppoeSession, "pppoe_sess_send", pack, l);
 
 	n = write(pppoeSession->iface->sessionSock, pack, l);
 	if (n < 0 )
-		LOG(0, "pppoe_sess_send: write: %s\n", strerror(errno));
+		LOG(0, pppoeSession, "pppoe_sess_send: write: %s\n", strerror(errno));
 	else if (n != l)
-		LOG(0, "pppoe_sess_send: short write %i/%i\n", n,l);
+		LOG(0, pppoeSession, "pppoe_sess_send: short write %i/%i\n", n,l);
 }
 
 // Only used in client mode
@@ -446,7 +473,7 @@ static void pppoe_send_PADT(const PPPoEInterface *iface, uint16_t sid, const uin
 
 	add_ac_name_tag(pack, iface->server_ac_name);
 
-	LOG(3, "pppoe: Sent PADT sid=0x%04x\n", sid);
+	LOG(3, NULL, "pppoe: Sent PADT sid=0x%04x\n", sid);
 
 	pppoe_disc_send(iface, pack);
 }
@@ -464,7 +491,7 @@ static void pppoe_recv_PADI(const PPPoEInterface *iface, uint8_t *pack, int size
 	int len;
 
 	if (!iface->acOK) {
-		LOG(3, "Ignoring PADI - not in ac mode\n");
+		LOG(3, NULL, "Ignoring PADI - not in ac mode\n");
 		return;
 	}
 
@@ -512,7 +539,7 @@ static void pppoe_recv_PADI(const PPPoEInterface *iface, uint8_t *pack, int size
 
 	if (!service_match)
 	{
-		LOG(3, 0, 0, "pppoe: discarding PADI packet (Service-Name mismatch)\n");
+		LOG(3, NULL, "pppoe: discarding PADI packet (Service-Name mismatch)\n");
 		return;
 	}
 
@@ -532,26 +559,26 @@ static void pppoe_recv_PADO(const PPPoEInterface *iface, uint8_t *pack, int size
 	int n, service_match = 0;
 
 	if (!iface->clientOK) {
-		LOG(3, "Ignoring PADO - not in client mode\n");
+		LOG(3, NULL, "Ignoring PADO - not in client mode\n");
 		return;
 	}
 
 #if 0
 	if (tunnel[t].state != TUNNELDISCPADI) {
-		LOG(1, "Rcv pppoe: discard PADO (not expecting it)\n");
+		LOG(1, NULL, "Rcv pppoe: discard PADO (not expecting it)\n");
 		return;
 	}
 #endif
 
 	if (!memcmp(ethhdr->h_dest, bc_addr, ETH_ALEN))
 	{
-		LOG(1, "Rcv pppoe: discard PADO (destination address is broadcast)\n");
+		LOG(1, NULL, "Rcv pppoe: discard PADO (destination address is broadcast)\n");
 		return;
 	}
 
 	if (hdr->sid)
 	{
-		LOG(1, "Rcv pppoe: discarding PADO packet (sid is not zero)\n");
+		LOG(1, NULL, "Rcv pppoe: discarding PADO packet (sid is not zero)\n");
 		return;
 	}
 
@@ -593,7 +620,7 @@ static void pppoe_recv_PADO(const PPPoEInterface *iface, uint8_t *pack, int size
 
 	if (!service_match)
 	{
-		LOG(3, "pppoe: Service-Name mismatch\n");
+		LOG(3, NULL, "pppoe: Service-Name mismatch\n");
 		pppoe_send_err(iface, ethhdr->h_source, host_uniq_tag, relay_sid_tag, PADS_CODE, PTT_SRV_ERR);
 		return;
 	}
@@ -618,19 +645,19 @@ static void pppoe_recv_PADR(const PPPoEInterface *iface, uint8_t *pack, int size
 	uint16_t sid;
 
 	if (!iface->acOK) {
-		LOG(3, "Ignoring PADR - not in ac mode\n");
+		LOG(3, NULL, "Ignoring PADR - not in ac mode\n");
 		return;
 	}
 
 	if (!memcmp(ethhdr->h_dest, bc_addr, ETH_ALEN))
 	{
-		LOG(1, "Rcv pppoe: discard PADR (destination address is broadcast)\n");
+		LOG(1, NULL, "Rcv pppoe: discard PADR (destination address is broadcast)\n");
 		return;
 	}
 
 	if (hdr->sid)
 	{
-		LOG(1, "Rcv pppoe: discarding PADR packet (sid is not zero)\n");
+		LOG(1, NULL, "Rcv pppoe: discarding PADR packet (sid is not zero)\n");
 		return;
 	}
 
@@ -672,26 +699,26 @@ static void pppoe_recv_PADR(const PPPoEInterface *iface, uint8_t *pack, int size
 
 	if (!service_match)
 	{
-		LOG(3, "pppoe: Service-Name mismatch\n");
+		LOG(3, NULL, "pppoe: Service-Name mismatch\n");
 		pppoe_send_err(iface, ethhdr->h_source, host_uniq_tag, relay_sid_tag, PADS_CODE, PTT_SRV_ERR);
 		return;
 	}
 
 	if (!ac_cookie_tag)
 	{
-		LOG(3, "pppoe: discard PADR packet (no AC-Cookie tag present)\n");
+		LOG(3, NULL, "pppoe: discard PADR packet (no AC-Cookie tag present)\n");
 		return;
 	}
 
 	if (ntohs(ac_cookie_tag->tag_len) != 16)
 	{
-		LOG(3, "pppoe: discard PADR packet (incorrect AC-Cookie tag length)\n");
+		LOG(3, NULL, "pppoe: discard PADR packet (incorrect AC-Cookie tag length)\n");
 		return;
 	}
 
 	if (pppoe_check_cookie(ethhdr->h_dest, ethhdr->h_source, (uint8_t *) ac_cookie_tag->tag_data))
 	{
-		LOG(3, "pppoe: discard PADR packet (incorrect AC-Cookie)\n");
+		LOG(3, NULL, "pppoe: discard PADR packet (incorrect AC-Cookie)\n");
 		return;
 	}
 
@@ -747,20 +774,20 @@ static void pppoe_recv_PADS(const PPPoEInterface *iface, uint8_t *pack, int size
 	uint16_t sid;
 
 	if (!iface->clientOK) {
-		LOG(3, "Ignoring PADS - not in client mode\n");
+		LOG(3, NULL, "Ignoring PADS - not in client mode\n");
 		return;
 	}
 
 #if 0
 	if (tunnel[t].state != TUNNELDISCPADR) {
-		LOG(1, 0, 0, "Rcv pppoe: discard PADS (not expecting it)\n");
+		LOG(1, NULL, "Rcv pppoe: discard PADS (not expecting it)\n");
 		return;
 	}
 #endif
 
 	if (!memcmp(ethhdr->h_dest, bc_addr, ETH_ALEN))
 	{
-		LOG(1, 0, 0, "Rcv pppoe: discard PADS (destination address is broadcast)\n");
+		LOG(1, NULL, "Rcv pppoe: discard PADS (destination address is broadcast)\n");
 		return;
 	}
 
@@ -799,7 +826,7 @@ static void pppoe_recv_PADS(const PPPoEInterface *iface, uint8_t *pack, int size
 
 	if (!service_match)
 	{
-		LOG(3, "pppoe: Service-Name mismatch\n");
+		LOG(3, NULL, "pppoe: Service-Name mismatch\n");
 		pppoe_send_err(iface, ethhdr->h_source, host_uniq_tag, relay_sid_tag, PADS_CODE, PTT_SRV_ERR);
 		return;
 	}
@@ -817,48 +844,54 @@ void processDiscovery(const PPPoEInterface *iface, uint8_t *pack, int size)
 	struct ethhdr *ethhdr = (struct ethhdr *)pack;
 	struct pppoe_hdr *hdr = (struct pppoe_hdr *)(pack + ETH_HLEN);
 
-	LOG(3, "RCV pppoe_disc: Code %s from %s\n", get_string_codepad(hdr->code), fmtMacAddr(ethhdr->h_source));
-	LOG_HEX(5, "PPPOE Disc", pack, size);
+	LOG(3, NULL, "RCV pppoe_disc: Code %s from %s\n", get_string_codepad(hdr->code), fmtMacAddr(ethhdr->h_source));
+	LOG_HEX(5, NULL, "PPPOE Disc", pack, size);
 
 	if (size < (ETH_HLEN + sizeof(*hdr)))
 	{
-		LOG(1, 0, 0, "Error pppoe_disc: short packet received (%i)\n", size);
+		LOG(1, NULL, "Error pppoe_disc: short packet received (%i)\n", size);
 		return;
+	}
+
+	/* Work around RouterOS bug */
+	if (memcmp(ethhdr->h_dest, mt_addr, ETH_ALEN)==0) {
+		LOG(1, NULL, "Fix Mikrotik RouterOS Bug\n");
+		memcpy(ethhdr->h_dest, iface->mac, ETH_ALEN);
 	}
 
 	if (memcmp(ethhdr->h_dest, bc_addr, ETH_ALEN) && memcmp(ethhdr->h_dest, iface->mac, ETH_ALEN))
 	{
-		LOG(1, 0, 0, "Error pppoe_disc: h_dest != Broadcast and  h_dest != %s\n", fmtMacAddr(iface->mac));
+		LOG(1, NULL, "Error pppoe_disc: h_dest != Broadcast and  h_dest != %s\n", fmtMacAddr(iface->mac));
 		return;
 	}
 
 	if (!memcmp(ethhdr->h_source, bc_addr, ETH_ALEN))
 	{
-		LOG(1, 0, 0, "Error pppoe_disc: discarding packet (source address is broadcast)\n");
+		LOG(1, NULL, "Error pppoe_disc: discarding packet (source address is broadcast)\n");
 		return;
 	}
 
 	if ((ethhdr->h_source[0] & 1) != 0)
 	{
-		LOG(1, 0, 0, "Error pppoe_disc: discarding packet (host address is not unicast)\n");
+		LOG(1, NULL, "Error pppoe_disc: discarding packet (host address is not unicast)\n");
 		return;
 	}
 
 	if (size < ETH_HLEN + sizeof(*hdr) + ntohs(hdr->length))
 	{
-		LOG(1, 0, 0, "Error pppoe_disc: short packet received\n");
+		LOG(1, NULL, "Error pppoe_disc: short packet received\n");
 		return;
 	}
 
 	if (hdr->ver != 1)
 	{
-		LOG(1, 0, 0, "Error pppoe_disc: discarding packet (unsupported version %i)\n", hdr->ver);
+		LOG(1, NULL, "Error pppoe_disc: discarding packet (unsupported version %i)\n", hdr->ver);
 		return;
 	}
 
 	if (hdr->type != 1)
 	{
-		LOG(1, 0, 0, "Error pppoe_disc: discarding packet (unsupported type %i)\n", hdr->type);
+		LOG(1, NULL, "Error pppoe_disc: discarding packet (unsupported type %i)\n", hdr->type);
 		return;
 	}
 
@@ -895,38 +928,38 @@ void processSession(const PPPoEInterface *iface, uint8_t *pack, int size)
 #if 0
 		sid = pppoe_local_sid;
 		if (pppoe_remote_sid!=ntohs(hdr->sid)) {
-			LOG(0, sid, t, "Received pppoe packet with invalid session ID (0x%04x)\n", sid;);
+			LOG(0, NULL, "Received pppoe packet with invalid session ID (0x%04x)\n", sid;);
 		}
 #endif
 	} else {
 		sid = ntohs(hdr->sid);
 	}
 
-	LOG_HEX(5, "RCV PPPOE Sess", pack, size);
+	LOG_HEX(5, NULL, "RCV PPPOE Sess", pack, size);
 
 	if ((pppoeSession=pppoe_find_session(sid, ethhdr->h_source))==NULL)
 	{
-		LOG(0, "Received pppoe packet with invalid session ID (0x%04x)\n", sid);
+		LOG(0, NULL, "Received pppoe packet with invalid session ID (0x%04x)\n", sid);
 		pppoe_send_PADT(iface, sid, ethhdr->h_source);
 		return;
 	}
 
 	if (hdr->ver != 1)
 	{
-		LOG(3, "Error processSession: discarding packet (unsupported version %i)\n", hdr->ver);
+		LOG(3, NULL, "Error processSession: discarding packet (unsupported version %i)\n", hdr->ver);
 		return;
 	}
 
 	if (hdr->type != 1)
 	{
-		LOG(3, "Error processSession: discarding packet (unsupported type %i)\n", hdr->type);
+		LOG(3, NULL, "Error processSession: discarding packet (unsupported type %i)\n", hdr->type);
 		return;
 	}
 
 	if (pppoeSession->pppSession) {
 		processPPP(pppoeSession->pppSession, pppdata, lppp);
 	} else {
-		LOG(3, "Error processSession: no pppSession active\n");
+		LOG(3, NULL, "Error processSession: no pppSession active\n");
 	}
 
 }
@@ -961,7 +994,7 @@ void discoveryServer(PPPoEInterface *iface, char *ac_name, char *service_name)
 static void pppoe_timer_cb(evutil_socket_t fd, short what, void *arg)
 {
 	PPPoEInterface *iface=(PPPoEInterface *) arg;
-	LOG(3, "pppoe_timer_cb called\n");
+	LOG(3, NULL, "pppoe_timer_cb called\n");
 	pppoe_send_PADI(iface);
 	startTimer(iface->timerEvent, 2);
 }
@@ -980,5 +1013,11 @@ void discoveryClient(PPPoEInterface *iface, char *ac_name, char *service_name, i
 	iface->timerEvent=newTimer(pppoe_timer_cb, iface);
 	pppoe_send_PADI(iface);
 	startTimer(iface->timerEvent, 2);
+}
+
+void pppoe_sessionkill(const PPPoESession *pppoeSession)
+{
+	pppoe_send_PADT(pppoeSession->iface, pppoeSession->sid, pppoeSession->peerMac);
+	memset((void *) pppoeSession, 0, sizeof(PPPoESession)); // OK I know it's a const
 }
 

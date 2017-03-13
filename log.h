@@ -22,17 +22,19 @@
 #include <arpa/inet.h>
 #endif
 
+#include "pppoe.h"
+
 void sysFatal(char const *str);
 void sysErr(char const *str);
 void printErr(char const *str);
 
 #undef LOG
 #undef LOG_HEX
-#define LOG(D, f, ...)    ({ if (D <= debuglevel) _log(D, f, ## __VA_ARGS__); })
-#define LOG_HEX(D, t, d, s)     ({ if (D <= debuglevel) _log_hex(D, t, d, s); })
+#define LOG(D, pppoe, f, ...)    ({ if (D <= debuglevel) _log(D, pppoe, f, ## __VA_ARGS__); })
+#define LOG_HEX(D, pppoe, t, d, s)     ({ if (D <= debuglevel) _log_hex(D, pppoe, t, d, s); })
 
-void _log(int level, const char *format, ...) __attribute__((format (printf, 2, 3)));
-void _log_hex(int level, const char *title, const uint8_t *data, int maxsize);
+void _log(int level, const PPPoESession *pppoe, const char *format, ...) __attribute__((format (printf, 3, 4)));
+void _log_hex(int level, const PPPoESession *pppoe, const char *title, const uint8_t *data, int maxsize);
 
 extern int debuglevel;
 extern FILE *log_stream;

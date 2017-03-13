@@ -61,4 +61,5 @@ uint8_t *pppoe_session_header(uint8_t *b, const PPPoESession *pppoeSession);
 void pppoe_incr_header_length(uint8_t *b, int n);
 void discoveryServer(PPPoEInterface *iface, char *ac_name, char *service_name);
 void discoveryClient(PPPoEInterface *iface, char *ac_name, char *service_name, int attempts);
+void pppoe_sessionkill(const PPPoESession *pppoeSession);
 #endif

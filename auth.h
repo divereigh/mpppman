@@ -11,5 +11,7 @@
 void processpap(PPPSession *pppSession, uint8_t *pack, int size);
 void processchap(PPPSession *pppSession, uint8_t *pack, int size);
 void sendchap(PPPSession *pppSession);
+void sendpap(PPPSession *pppSession);
+void do_auth(PPPSession *pppSession);
 
 #endif

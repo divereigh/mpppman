@@ -49,6 +49,8 @@
 #include "event.h"
 #include "ppp.h"
 #include "lcp.h"
+#include "auth.h"
+#include "ip.h"
 
 #define INTERFACE "vlan50"
 int debuglevel=4;
@@ -66,20 +68,65 @@ void cb_func(evutil_socket_t fd, short what, void *arg)
 		data);
 }
 
+PPPoESession *downstream=NULL;
+PPPoESession *upstream=NULL;
+
+void ppp_cb(PPPSession *pppSession, int action)
+{
+	LOG(3, pppSession->pppoeSession, "ppp_cb called: action=%d\n", action);
+	if (((pppSession->flags & SESSION_CLIENT)==0) && pppSession->pppoeSession == downstream) {
+		if (action==1) {
+			if (upstream && upstream->pppSession) {
+				LOG(3, pppSession->pppoeSession, "trigger upstream auth\n");
+				strcpy(upstream->pppSession->user, downstream->pppSession->user);
+				strcpy(upstream->pppSession->pass, downstream->pppSession->pass);
+				upstream->pppSession->flags |= SESSION_GOTAUTH;
+				do_auth(upstream->pppSession);
+			}
+		} else if (action==3) {
+			if (upstream && upstream->pppSession) {
+				LOG(3, pppSession->pppoeSession, "Link sessions\n");
+				upstream->pppSession->link=downstream->pppSession;
+				downstream->pppSession->link=upstream->pppSession;
+			}
+		} else if (action==4) {
+			if (upstream && upstream->pppSession) {
+				LOG(3, pppSession->pppoeSession, "Un-link sessions and shutdown upstream\n");
+				upstream->pppSession->link=NULL;
+				downstream->pppSession->link=NULL;
+				sessionshutdown(upstream->pppSession, 1, "Local terminate request");
+			}
+		}
+	} else if (((pppSession->flags & SESSION_CLIENT)) && pppSession->pppoeSession == upstream) {
+		if (action==2) {
+			if (downstream && downstream->pppSession) {
+				LOG(3, pppSession->pppoeSession, "trigger downstream auth\n");
+				downstream->pppSession->flags |= SESSION_AUTHOK;
+				// Wait for another auth request
+			}
+		} else if (action==3) {
+			if (downstream && downstream->pppSession) {
+				LOG(3, pppSession->pppoeSession, "trigger downstream IPCP\n");
+				downstream->pppSession->ip_local=upstream->pppSession->ip_remote;
+				downstream->pppSession->ip_remote=upstream->pppSession->ip_local;
+				sendipcp(downstream->pppSession);
+			}
+		}
+	}
+}
+
 void discovery_cb(PPPoESession *pppoeSession, int action)
 {
 	if (pppoeSession->server) {
-		LOG(3, "discover server session started %s/%s\n", pppoeSession->ac_name, pppoeSession->service_name);
-		pppoeSession->pppSession=ppp_new_session(pppoeSession);
-		sendLCPConfigReq(pppoeSession->pppSession);
-		change_state(pppoeSession->pppSession, lcp, RequestSent);
+		LOG(3, pppoeSession, "discover server session started %s/%s\n", pppoeSession->ac_name, pppoeSession->service_name);
+		downstream=pppoeSession;
+		pppServer(pppoeSession, ppp_cb);
 
-		discoveryClient(pppoeSession->iface, NULL, NULL, 10);
+		discoveryClient((PPPoEInterface *) pppoeSession->iface, NULL, NULL, 10); // Lose the const
 	} else {
-		LOG(3, "discover client session started %s/%s\n", pppoeSession->ac_name, pppoeSession->service_name);
-		pppoeSession->pppSession=ppp_new_session(pppoeSession);
-		// sendLCPConfigReq(pppoeSession->pppSession);
-		// change_state(pppoeSession->pppSession, lcp, RequestSent);
+		LOG(3, pppoeSession, "discover client session started %s/%s\n", pppoeSession->ac_name, pppoeSession->service_name);
+		upstream=pppoeSession;
+		pppClient(pppoeSession, ppp_cb);
 	}
 }
 
@@ -88,12 +135,12 @@ int main() {
 	struct timeval five_seconds = {5,0};
 	PPPoEInterface *pppoe;
 
-	log_stream=stderr;
+	log_stream=stdout;
 	srand(getpid());
 	initEvent();
 	pppoe=openPPPoEInterface(INTERFACE, discovery_cb);
-	//discoveryServer(pppoe, NULL, NULL);
-	discoveryClient(pppoe, NULL, NULL, 10);
+	discoveryServer(pppoe, NULL, NULL);
+	//discoveryClient(pppoe, NULL, NULL, 10);
 
 	// ev1=event_new(base, pppoe->discoverySock, EV_TIMEOUT|EV_READ|EV_PERSIST, cb_func, (char *) "Reading event");
 	// ev1=event_new(base, 0, EV_TIMEOUT, cb_func, (char *) "Reading event");

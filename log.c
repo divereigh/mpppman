@@ -66,13 +66,13 @@ sysFatal(char const *str)
 void
 sysErr(char const *str)
 {
-	LOG(0, "%.256s: %.256s\n", str, strerror(errno));
+	LOG(0, NULL, "%.256s: %.256s\n", str, strerror(errno));
 }
 
 //
 // Log a debug message.  Typically called via the LOG macro
 //
-void _log(int level, const char *format, ...)
+void _log(int level, const PPPoESession *pppoe, const char *format, ...)
 {
 	static char message[65536] = {0};
 	va_list ap;
@@ -114,7 +114,7 @@ void _log(int level, const char *format, ...)
 	vsnprintf(message, sizeof(message), format, ap);
 
 	if (log_stream)
-		fprintf(log_stream, "%s %s", time_now_string, message);
+		fprintf(log_stream, "%s [%04x] %s", time_now_string, pppoe ? pppoe->sid : 0, message);
 /*
 	else if (syslog_log)
 		syslog(level + 2, "%s", message); // We don't need LOG_EMERG or LOG_ALERT
@@ -123,7 +123,7 @@ void _log(int level, const char *format, ...)
 	va_end(ap);
 }
 
-void _log_hex(int level, const char *title, const uint8_t *data, int maxsize)
+void _log_hex(int level, const PPPoESession *pppoe, const char *title, const uint8_t *data, int maxsize)
 {
 	int i, j;
 	const uint8_t *d = data;
@@ -133,7 +133,7 @@ void _log_hex(int level, const char *title, const uint8_t *data, int maxsize)
 	// No support for _log_hex to syslog
 	if (log_stream)
 	{
-		_log(level, 0, 0, "%s (%d bytes):\n", title, maxsize);
+		_log(level, pppoe, "%s (%d bytes):\n", title, maxsize);
 		setvbuf(log_stream, NULL, _IOFBF, 16384);
 
 		for (i = 0; i < maxsize; )

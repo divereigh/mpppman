@@ -85,7 +85,7 @@ openInterface(char const *ifname, uint16_t type, unsigned char *hwaddr, uint16_t
 	if ((fd = socket(domain, stype, htons(type))) < 0) {
 		/* Give a more helpful message for the common error case */
 		if (errno == EPERM) {
-			LOG(0, "Cannot create raw socket -- must be run as root.\n");
+			LOG(0, NULL, "Cannot create raw socket -- must be run as root.\n");
 		}
 		sysFatal("socket");
 	}
@@ -130,7 +130,7 @@ openInterface(char const *ifname, uint16_t type, unsigned char *hwaddr, uint16_t
 		char buffer[256];
 		sprintf(buffer, "Interface %.16s has MTU of %d -- should be %d.  You may have serious connection problems.",
 		ifname, ifr.ifr_mtu, ETH_DATA_LEN);
-		LOG(0, "%s\n", buffer);
+		LOG(0, NULL, "%s\n", buffer);
 	}
 	if (mtu) *mtu = ifr.ifr_mtu;
 

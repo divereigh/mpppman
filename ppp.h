@@ -21,20 +21,10 @@
 #define AUTHPAP         1       // allow PAP
 #define AUTHCHAP        2       // allow CHAP
 
-// I can't believe these are in a header file somewhere
-#define LCP_CONFREQ     1
-#define LCP_CONFACK     2
-#define LCP_CONFNAK     3
-#define LCP_CONFREJ     4
-#define LCP_TERMREQ     5
-#define LCP_TERMACK     6
-#define LCP_CODEREJ     7
-#define LCP_PROTOCOLREJ 8
-#define LCP_ECHOREQ     9
-#define LCP_ECHOREPLY   10
-#define LCP_DISCARDREQ  11
-#define LCP_IDENTREQ    12
 
+typedef struct PPPSessionStruct PPPSession;
+
+typedef void (*ppp_cb_func)(PPPSession *, int);
 
 // This should be a time_t I reckon - DAI
 typedef uint32_t clockt;
@@ -45,6 +35,14 @@ extern int ppp_max_configure;
 extern int radius_authtypes;
 extern int radius_authprefer;
 extern int MRU;
+
+// session flags
+#define SESSION_PFC     (1 << 0)        // use Protocol-Field-Compression
+#define SESSION_ACFC    (1 << 1)        // use Address-and-Control-Field-Compression
+#define SESSION_STARTED (1 << 2)        // RADIUS Start record sent
+#define SESSION_CLIENT  (1 << 3)        // Is this a client session
+#define SESSION_GOTAUTH (1 << 4)        // Have we got authentication credentials
+#define SESSION_AUTHOK  (1 << 5)        // Have those credentials been authenticated
 
 #include "pppoe.h"
 #include "event.h"
@@ -82,6 +80,21 @@ enum
         PSNDN,
 };
 
+enum {
+	ConfigReq = 1,
+	ConfigAck,
+	ConfigNak,
+	ConfigRej,
+	TerminateReq,
+	TerminateAck,
+	CodeRej,
+	ProtocolRej,
+	EchoReq,
+	EchoReply,
+	DiscardRequest,
+	IdentRequest
+};
+
 typedef struct {
 	uint8_t length;                 // Endpoint Discriminator length
 	uint8_t addr_class;             // Endpoint Discriminator class
@@ -90,6 +103,7 @@ typedef struct {
 
 typedef struct PPPSessionStruct {
 	const PPPoESession *pppoeSession; // Match PPPoESession
+	struct PPPSessionStruct *link;	// Linked session
 	struct {
 		uint8_t phase;          // PPP phase
 		uint8_t lcp:4;          //   LCP    state
@@ -97,6 +111,7 @@ typedef struct PPPSessionStruct {
 		uint8_t ipv6cp:4;       //   IPV6CP state
 		uint8_t ccp:4;          //   CCP    state
 	} ppp;
+	uint8_t flags;			// session flags: see SESSION_*
 	uint16_t mru;			// maximum receive unit
 	in_addr_t ip_remote;		// Remote IP of session
 	in_addr_t ip_local;		// Local IP of session
@@ -111,8 +126,10 @@ typedef struct PPPSessionStruct {
 	in_addr_t dns1, dns2;		// DNS servers
 	time_t last_packet;		// Last packet from the user (used for idle timeouts)
 	time_t last_data;		// Last data packet to/from the user (used for idle timeouts)
-	char user[MAXUSER];		// username for client session
-	char password[MAXPASS];		// password for client session
+	char user[MAXUSER];		// username for session
+	char pass[MAXPASS];		// password for session
+
+	ppp_cb_func cb;			// Call back function for stages of PPP
 
 	// Remote settings
 	uint32_t mrru;                  // Multilink Max-Receive-Reconstructed-Unit
@@ -178,6 +195,12 @@ typedef struct PPPSessionStruct {
                 time_now + ppp_restart_time;            	\
 })
 
+// increment ConfReq counter and reset timer
+#define start_close_timer(_s, _fsm) ({				\
+	change_state(_s, _fsm, Closing);			\
+	startTimer(_s->_fsm.timerEvent, ppp_restart_time);	\
+})
+
 // reset state machine counters
 #define initialise_restart_count(_s, _fsm)			\
 	_s->_fsm.conf_sent =					\
@@ -214,11 +237,23 @@ typedef struct PPPSessionStruct {
 	}							\
 })
 
-PPPSession * ppp_new_session(const PPPoESession *pppoeSession);
+PPPSession * ppp_new_session(const PPPoESession *pppoeSession, uint8_t flags);
 uint8_t *pppoe_makeppp(uint8_t *b, int size, uint8_t *p, int l, const PPPSession *pppSession,
 		uint16_t mtype, uint8_t prio, int bid, uint8_t mp_bits);
 void sendlcp(PPPSession *pppSession);
 void processPPP(PPPSession *pppSession, uint8_t *pack, int size);
-void sessionshutdown(PPPSession *pppSession, char const *reason);
+void sessionshutdown(PPPSession *pppSession, int initiate, char const *reason);
+void sessionkill(PPPSession *pppSession);
+PPPSession *pppClient(PPPoESession *pppoeSession, ppp_cb_func cb);
+PPPSession *pppServer(PPPoESession *pppoeSession, ppp_cb_func cb);
+int sessionsetup(PPPSession *pppSession);
+int sessionsetup_client(PPPSession *pppSession);
+void ppp_code_rej(PPPSession *pppSession, uint16_t proto,
+	char *pname, uint8_t *p, uint16_t l, uint8_t *buf, size_t size);
+uint8_t *ppp_conf_nak(PPPSession *pppSession, uint8_t *buf, size_t blen, uint16_t mtype,
+	uint8_t **response, uint8_t *queued, uint8_t *packet, uint8_t *option,
+	uint8_t *value, size_t vlen);
+uint8_t *ppp_conf_rej(PPPSession *pppSession, uint8_t *buf, size_t blen, uint16_t mtype,
+	uint8_t **response, uint8_t *queued, uint8_t *packet, uint8_t *option);
 
 #endif

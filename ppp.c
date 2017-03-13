@@ -54,7 +54,7 @@ static void ppp_timer_cb(evutil_socket_t fd, short what, void *arg)
 	PPPSession *pppSession=cp->pppSession;
 	if (cp==&pppSession->lcp) {
 		int next_state = pppSession->ppp.lcp;
-		LOG(3, "Got a timeout event for LCP\n");
+		LOG(3, pppSession->pppoeSession, "Got a timeout event for LCP\n");
 		switch (pppSession->ppp.lcp)
 		{
 		case RequestSent:
@@ -64,36 +64,42 @@ static void ppp_timer_cb(evutil_socket_t fd, short what, void *arg)
 		case AckSent:
 			if (pppSession->lcp.conf_sent < ppp_max_configure)
 			{
-				LOG(3, "No ACK for LCP ConfigReq... resending\n");
+				LOG(3, pppSession->pppoeSession, "No ACK for LCP ConfigReq... resending\n");
 				sendLCPConfigReq(pppSession);
 				change_state(pppSession, lcp, next_state);
 			}
 			else
 			{
-				sessionshutdown(pppSession, "No response to LCP ConfigReq.");
+				sessionshutdown(pppSession, 1, "No response to LCP ConfigReq.");
 			}
+			break;
+
+		case Closing:
+			LOG(3, pppSession->pppoeSession, "Timer expired on close - kill the session\n");
+			sessionkill(pppSession);
+			break;
 		}
 
 	} else if (cp==&pppSession->ipcp) {
-		LOG(3, "Got a timeout event for IPCP\n");
+		LOG(3, pppSession->pppoeSession, "Got a timeout event for IPCP\n");
 	} else if (cp==&pppSession->ipv6cp) {
-		LOG(3, "Got a timeout event for IPV6CP\n");
+		LOG(3, pppSession->pppoeSession, "Got a timeout event for IPV6CP\n");
 	} else if (cp==&pppSession->ccp) {
-		LOG(3, "Got a timeout event for CCP\n");
+		LOG(3, pppSession->pppoeSession, "Got a timeout event for CCP\n");
 	} else {
-		LOG(3, "Got an unknown timeout event\n");
+		LOG(3, pppSession->pppoeSession, "Got an unknown timeout event\n");
 	}
 }
 
 /* Allocate and fill new session - returns PPPSession */
-PPPSession * ppp_new_session(const PPPoESession *pppoeSession)
+PPPSession * ppp_new_session(const PPPoESession *pppoeSession, uint8_t flags)
 {
 	uint16_t sid;
 	int i;
 	PPPSession *pppSession;
 
 	if ((pppSession=ppp_find_free_session()) == NULL) {
-		LOG(0, "No free PPPSession available\n");
+		LOG(0, pppoeSession, "No free PPPSession available\n");
 	}
 	
 	pppSession->pppoeSession=pppoeSession;
@@ -109,16 +115,19 @@ PPPSession * ppp_new_session(const PPPoESession *pppoeSession)
 
 	pppSession->magic = time_now; // set magic number
 	pppSession->mru = PPPoE_MRU; // default
+	pppSession->flags = flags;
 
 	// start LCP - prefer PAP
 	pppSession->lcp_authtype = AUTHPAP;
 	// TODO - Need to calculate this properly
 	pppSession->ppp_mru = PPPoE_MRU; // Should be MRU;
 
-	// Set multilink options before sending initial LCP packet
-	pppSession->mp_mrru = 1614;
-	// pppSession->mp_epdis = ntohl(config->iftun_address ? config->iftun_address : my_address);
-	pppSession->mp_epdis = htonl(0x01010101);
+	if ((pppSession->flags & SESSION_CLIENT)) {
+		// Set multilink options before sending initial LCP packet
+		pppSession->mp_mrru = 1614;
+		// pppSession->mp_epdis = ntohl(config->iftun_address ? config->iftun_address : my_address);
+		pppSession->mp_epdis = htonl(0x01010101);
+	}
 
 	// sendlcp(pppSession);
 	// change_state(pppSession, lcp, RequestSent);
@@ -150,7 +159,7 @@ uint8_t *pppoe_makeppp(uint8_t *b, int size, uint8_t *p, int l, const PPPSession
 
 	if (size < 28) // Need more space than this!!
 	{
-		LOG(0, "pppoe_makeppp buffer too small for pppoe header (size=%d)\n", size);
+		LOG(0, pppSession->pppoeSession, "pppoe_makeppp buffer too small for pppoe header (size=%d)\n", size);
 		return NULL;
 	}
 
@@ -208,7 +217,7 @@ uint8_t *pppoe_makeppp(uint8_t *b, int size, uint8_t *p, int l, const PPPSession
 
 	if ((b - start) + l > size)
 	{
-		LOG(0, "pppoe_makeppp would overflow buffer (size=%d, header+payload=%td)\n", size, (b - start) + l);
+		LOG(0, pppSession->pppoeSession, "pppoe_makeppp would overflow buffer (size=%d, header+payload=%td)\n", size, (b - start) + l);
 		return NULL;
 	}
 
@@ -244,14 +253,14 @@ void processPPP(PPPSession *pppSession, uint8_t *pack, int size)
 	
 	if (size > 2 && pack[0] == 0xFF && pack[1] == 0x03)
 	{	// HDLC address header, discard
-		LOG(5, "processSession: HDLC address header, discard\n");
+		LOG(5, pppSession->pppoeSession, "processSession: HDLC address header, discard\n");
 		pack += 2;
 		size -= 2;
 	}
 
 	if (size < 2)
 	{
-		LOG(3, "Error process_pppoe_sess: Short ppp length %d\n", size);
+		LOG(3, pppSession->pppoeSession, "Error process_pppoe_sess: Short ppp length %d\n", size);
 		return;
 	}
 	if (*pack & 1)
@@ -319,13 +328,16 @@ void processPPP(PPPSession *pppSession, uint8_t *pack, int size)
 	}
 	else
 	{
-		LOG(3, "processPPP: Unknown PPP protocol 0x%04X received in LCP %s state\n",
+		LOG(3, pppSession->pppoeSession, "processPPP: Unknown PPP protocol 0x%04X received in LCP %s state\n",
 			proto, ppp_state(pppSession->ppp.lcp));
 	}
 }
 
-// start tidy shutdown of session
-void sessionshutdown(PPPSession *pppSession, char const *reason)
+// start tidy shutdown of session, if initiate==1 then will send a TerminateReq
+// Will set the status to 'Closing' and will initiate a timer to complete the kill
+// If we get a TerminateAck then we will proceed to the kill immediately
+// Probably should live in lcp.c
+void sessionshutdown(PPPSession *pppSession, int initiate, char const *reason)
 {
 #if 0
 	int walled_garden = session[s].walled_garden;
@@ -484,46 +496,362 @@ void sessionshutdown(PPPSession *pppSession, char const *reason)
         	}
 	}
 
-	if (session[s].throttle_in || session[s].throttle_out) // Unthrottle if throttled.
-		throttle_session(s, 0, 0);
+#endif
 
-	if (cdn_result)
+	if (initiate) {
+		sendLCPTerminateReq(pppSession, reason);
+		
+	}
+
+	// clear PPP state
+	memset(&pppSession->ppp, 0, sizeof(pppSession->ppp));
+	pppSession->lcp.restart = 0;
+	pppSession->ipcp.restart = 0;
+	pppSession->ipv6cp.restart = 0;
+	pppSession->ccp.restart = 0;
+
+	start_close_timer(pppSession, lcp);
+
+	(*pppSession->cb)(pppSession, 4);
+}
+
+void sessionkill(PPPSession *pppSession)
+{
+	LOG(3, pppSession->pppoeSession, "LCP: Kill Session\n");
+	change_state(pppSession, lcp, Closed);
+	pppoe_sessionkill(pppSession->pppoeSession);
+	memset(pppSession, 0, sizeof(pppSession));
+}
+
+PPPSession *pppServer(PPPoESession *pppoeSession, ppp_cb_func cb)
+{
+	pppoeSession->pppSession=ppp_new_session(pppoeSession, 0);
+	pppoeSession->pppSession->cb=cb;
+	sendLCPConfigReq(pppoeSession->pppSession);
+	change_state(pppoeSession->pppSession, lcp, RequestSent);
+	return(pppoeSession->pppSession);
+}
+
+PPPSession *pppClient(PPPoESession *pppoeSession, ppp_cb_func cb)
+{
+	pppoeSession->pppSession=ppp_new_session(pppoeSession, SESSION_CLIENT);
+	pppoeSession->pppSession->cb=cb;
+	sendLCPConfigReq(pppoeSession->pppSession);
+	change_state(pppoeSession->pppSession, lcp, RequestSent);
+	return(pppoeSession->pppSession);
+}
+
+int sessionsetup(PPPSession *pppSession)
+{
+#if 0
+	// A session now exists, set it up
+	in_addr_t ip;
+	char *user;
+	sessionidt i;
+	int r;
+
+	CSTAT(sessionsetup);
+
+	LOG(3, s, t, "Doing session setup for session\n");
+
+	// Join a bundle if the MRRU option is accepted
+	if(session[s].mrru > 0 && session[s].bundle == 0)
 	{
-		if (session[s].tunnel == TUNNEL_ID_PPPOE)
-		{
-			pppoe_shutdown_session(s);
-		}
+		LOG(3, s, t, "This session can be part of multilink bundle\n");
+		if (join_bundle(s) > 0)
+			cluster_send_bundle(session[s].bundle);
 		else
 		{
-			// Send CDN
-			controlt *c = controlnew(14); // sending CDN
-			if (cdn_error)
-			{
-				uint16_t buf[2];
-				buf[0] = htons(cdn_result);
-				buf[1] = htons(cdn_error);
-				controlb(c, 1, (uint8_t *)buf, 4, 1);
-			}
-			else
-				control16(c, 1, cdn_result, 1);
-
-			control16(c, 14, s, 1);   // assigned session (our end)
-			controladd(c, session[s].far, session[s].tunnel); // send the message
+			LOG(0, s, t, "MPPP: Unable to join bundle\n");
+			sessionshutdown(s, "Unable to join bundle", CDN_NONE, TERM_SERVICE_UNAVAILABLE);
+			return 0;
 		}
 	}
 
-	// update filter refcounts
-	if (session[s].filter_in) ip_filters[session[s].filter_in - 1].used--;
-	if (session[s].filter_out) ip_filters[session[s].filter_out - 1].used--;
+	session[s].ip_local= config->peer_address ? config->peer_address :
+			 config->iftun_n_address[tunnel[t].indexudp] ? config->iftun_n_address[tunnel[t].indexudp] :
+			 my_address; // send my IP
 
-	// clear PPP state
-	memset(&session[s].ppp, 0, sizeof(session[s].ppp));
-	sess_local[s].lcp.restart = 0;
-	sess_local[s].ipcp.restart = 0;
-	sess_local[s].ipv6cp.restart = 0;
-	sess_local[s].ccp.restart = 0;
+	if (!session[s].ip)
+	{
+		assign_ip_address(s);
+		if (!session[s].ip)
+		{
+			LOG(0, s, t, "   No IP allocated.  The IP address pool is FULL!\n");
+			sessionshutdown(s, "No IP addresses available.", CDN_TRY_ANOTHER, TERM_SERVICE_UNAVAILABLE);
+			return 0;
+		}
+		LOG(3, s, t, "   No IP allocated.  Assigned %s from pool\n",
+			fmtaddr(htonl(session[s].ip), 0));
+	}
 
-	cluster_send_session(s);
+	// Make sure this is right
+	session[s].tunnel = t;
+
+	// zap old sessions with same IP and/or username
+	// Don't kill gardened sessions - doing so leads to a DoS
+	// from someone who doesn't need to know the password
+	{
+		ip = session[s].ip;
+		user = session[s].user;
+		for (i = 1; i <= config->cluster_highest_sessionid; i++)
+		{
+			if (i == s) continue;
+			if (!session[s].opened) break;
+			// Allow duplicate sessions for multilink ones of the same bundle.
+			if (session[s].bundle && session[i].bundle && session[s].bundle == session[i].bundle) continue;
+
+			if (ip == session[i].ip)
+			{
+				sessionshutdown(i, "Duplicate IP address", CDN_ADMIN_DISC, TERM_ADMIN_RESET);  // close radius/routes, etc.
+				continue;
+			}
+
+			if (config->allow_duplicate_users) continue;
+			if (session[s].walled_garden || session[i].walled_garden) continue;
+			// Guest change
+			int found = 0;
+			int gu;
+			for (gu = 0; gu < guest_accounts_num; gu++)
+			{
+				if (!strcasecmp(user, guest_users[gu]))
+				{
+					found = 1;
+					break;
+				}
+			}
+			if (found) continue;
+
+			// Drop the new session in case of duplicate sessionss, not the old one.
+			if (!strcasecmp(user, session[i].user))
+				sessionshutdown(i, "Duplicate session for users", CDN_ADMIN_DISC, TERM_ADMIN_RESET);  // close radius/routes, etc.
+		}
+	}
+
+	// no need to set a route for the same IP address of the bundle
+	if (!session[s].bundle || (bundle[session[s].bundle].num_of_links == 1))
+	{
+		int routed = 0;
+
+		// Add the route for this session.
+		for (r = 0; r < MAXROUTE && session[s].route[r].ip; r++)
+		{
+			if ((session[s].ip >> (32-session[s].route[r].prefixlen)) ==
+			    (session[s].route[r].ip >> (32-session[s].route[r].prefixlen)))
+				routed++;
+
+			routeset(s, session[s].route[r].ip, session[s].route[r].prefixlen, 0, 1);
+		}
+
+		// Static IPs need to be routed if not already
+		// convered by a Framed-Route.  Anything else is part
+		// of the IP address pool and is already routed, it
+		// just needs to be added to the IP cache.
+		// IPv6 route setup is done in ppp.c, when IPV6CP is acked.
+		if (session[s].ip_pool_index == -1) // static ip
+		{
+			if (!routed) routeset(s, session[s].ip, 0, 0, 1);
+		}
+		else
+			cache_ipmap(session[s].ip, s);
+	}
+
+	sess_local[s].lcp_authtype = 0; // RADIUS authentication complete
+	lcp_open(s, t); // transition to Network phase and send initial IPCP
+
+	// Run the plugin's against this new session.
+	{
+		struct param_new_session data = { &tunnel[t], &session[s] };
+		run_plugins(PLUGIN_NEW_SESSION, &data);
+	}
+
+	// Allocate TBFs if throttled
+	if (session[s].throttle_in || session[s].throttle_out)
+		throttle_session(s, session[s].throttle_in, session[s].throttle_out);
+
+	session[s].last_packet = session[s].last_data = time_now;
+
+	LOG(2, s, t, "Login by %s at %s from %s (%s)\n", session[s].user,
+		fmtaddr(htonl(session[s].ip), 0),
+		fmtaddr(htonl(tunnel[t].ip), 1), tunnel[t].hostname);
+
+	cluster_send_session(s);	// Mark it as dirty, and needing to the flooded to the cluster.
+
+	return 1;       // RADIUS OK and IP allocated, done...
 #endif
+	return 0;
 }
+
+int sessionsetup_client(PPPSession *pppSession)
+{
+#if 0
+	// A session now exists, set it up
+	int r;
+
+	LOG(3, s, t, "Doing client session setup for session\n");
+
+	// Join a bundle if the MRRU option is accepted
+	if(session[s].mrru > 0 && session[s].bundle == 0)
+	{
+		LOG(3, s, t, "This session can be part of multilink bundle\n");
+		if (join_bundle(s) > 0)
+			cluster_send_bundle(session[s].bundle);
+		else
+		{
+			LOG(0, s, t, "MPPP: Unable to join bundle\n");
+			sessionshutdown(s, "Unable to join bundle", CDN_NONE, TERM_SERVICE_UNAVAILABLE);
+			return 0;
+		}
+	}
+
+	// Make sure this is right
+	session[s].tunnel = t;
+
+	// no need to set a route for the same IP address of the bundle
+	if (!session[s].bundle || (bundle[session[s].bundle].num_of_links == 1))
+	{
+		int routed = 0;
+
+		// Add the route for this session.
+		for (r = 0; r < MAXROUTE && session[s].route[r].ip; r++)
+		{
+			if ((session[s].ip >> (32-session[s].route[r].prefixlen)) ==
+			    (session[s].route[r].ip >> (32-session[s].route[r].prefixlen)))
+				routed++;
+
+			routeset(s, session[s].route[r].ip, session[s].route[r].prefixlen, 0, 1);
+		}
+
+		// Static IPs need to be routed if not already
+		// convered by a Framed-Route.  Anything else is part
+		// of the IP address pool and is already routed, it
+		// just needs to be added to the IP cache.
+		// IPv6 route setup is done in ppp.c, when IPV6CP is acked.
+		if (session[s].ip_pool_index == -1) // static ip
+		{
+			if (!routed) routeset(s, session[s].ip, 0, 0, 1);
+		}
+		else
+			cache_ipmap(session[s].ip, s);
+	}
+
+	// Run the plugin's against this new session.
+	{
+		struct param_new_session data = { &tunnel[t], &session[s] };
+		run_plugins(PLUGIN_NEW_SESSION, &data);
+	}
+
+	// Allocate TBFs if throttled
+	if (session[s].throttle_in || session[s].throttle_out)
+		throttle_session(s, session[s].throttle_in, session[s].throttle_out);
+
+	session[s].last_packet = session[s].last_data = time_now;
+
+	LOG(2, s, t, "Login by %s at %s from %s (%s)\n", session[s].user,
+		fmtaddr(htonl(session[s].ip), 0),
+		fmtaddr(htonl(tunnel[t].ip), 1), tunnel[t].hostname);
+
+	cluster_send_session(s);	// Mark it as dirty, and needing to the flooded to the cluster.
+
+	return 1;       // RADIUS OK and IP allocated, done...
+#endif
+	return 0;
+}
+
+void ppp_code_rej(PPPSession *pppSession, uint16_t proto,
+	char *pname, uint8_t *p, uint16_t l, uint8_t *buf, size_t size)
+{
+	uint8_t *q;
+	int mru = pppSession->mru;
+	if (mru < MINMTU) mru = MINMTU;
+	if (mru > size) mru = size;
+
+	l += 4;
+	if (l > mru) l = mru;
+
+	q = pppoe_makeppp(buf, size, 0, 0, pppSession, proto, 0, 0, 0);
+	if (!q) return;
+
+	*q = CodeRej;
+	*(q + 1) = ++pppSession->lcp_ident;
+	*(uint16_t *)(q + 2) = htons(l);
+	memcpy(q + 4, p, l - 4);
+
+	LOG(2, pppSession->pppoeSession, "Unexpected %s code %s\n", pname, ppp_code(*p));
+	LOG(3, pppSession->pppoeSession, "%s: send %s\n", pname, ppp_code(*q));
+	if (debuglevel > 3) dumplcp(pppSession->pppoeSession, q, l);
+
+	pppoe_sess_send(pppSession->pppoeSession, buf, l + (q - buf));
+}
+
+uint8_t *ppp_conf_nak(PPPSession *pppSession, uint8_t *buf, size_t blen, uint16_t mtype,
+	uint8_t **response, uint8_t *queued, uint8_t *packet, uint8_t *option,
+	uint8_t *value, size_t vlen)
+{
+    	int *nak_sent;
+	switch (mtype)
+	{
+	case PPP_LCP:	nak_sent = &pppSession->lcp.nak_sent;    break;
+	case PPP_IPCP:	nak_sent = &pppSession->ipcp.nak_sent;   break;
+	case PPP_IPV6CP:	nak_sent = &pppSession->ipv6cp.nak_sent; break;
+	default:	return 0; // ?
+	}
+
+	if (*response && **response != ConfigNak)
+	{
+	    	if (*nak_sent < ppp_max_failure) // reject queued
+			return queued;
+
+		return ppp_conf_rej(pppSession, buf, blen, mtype, response, 0, packet, option);
+	}
+
+	if (!*response)
+	{
+	    	if (*nak_sent >= ppp_max_failure)
+			return ppp_conf_rej(pppSession, buf, blen, mtype, response, 0, packet, option);
+
+		queued = *response = pppoe_makeppp(buf, blen, packet, 2, pppSession, mtype, 0, 0, 0);
+		if (!queued)
+			return 0;
+
+		(*nak_sent)++;
+		*queued = ConfigNak;
+		queued += 4;
+	}
+
+	if ((queued - buf + vlen + 2) > blen)
+	{
+		LOG(2, pppSession->pppoeSession, "PPP overflow for ConfigNak (proto %u, option %u).\n", mtype, *option);
+		return 0;
+	}
+
+	*queued++ = *option;
+	*queued++ = vlen + 2;
+	memcpy(queued, value, vlen);
+	return queued + vlen;
+}
+
+uint8_t *ppp_conf_rej(PPPSession *pppSession, uint8_t *buf, size_t blen, uint16_t mtype,
+	uint8_t **response, uint8_t *queued, uint8_t *packet, uint8_t *option)
+{
+	if (!*response || **response != ConfigRej)
+	{
+		queued = *response = pppoe_makeppp(buf, blen, packet, 2, pppSession, mtype, 0, 0, 0);
+		if (!queued)
+			return 0;
+
+		*queued = ConfigRej;
+		queued += 4;
+	}
+
+	if ((queued - buf + option[1]) > blen)
+	{
+		LOG(2, pppSession->pppoeSession, "PPP overflow for ConfigRej (proto %u, option %u).\n", mtype, *option);
+		return 0;
+	}
+
+	memcpy(queued, option, option[1]);
+	return queued + option[1];
+}
+
 

@@ -77,7 +77,7 @@ static void ipcp_open(PPPSession *pppSession)
 
 	change_state(pppSession, ipcp, Opened);
 
-	(*pppSession->cb)(pppSession, 3);
+	(*pppSession->cb)(pppSession, PPPCBACT_IPCPOK);
 #if 0
 
 	// start IPv6 if configured and still in passive state

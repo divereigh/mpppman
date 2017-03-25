@@ -44,6 +44,11 @@ extern int MRU;
 #define SESSION_GOTAUTH (1 << 4)        // Have we got authentication credentials
 #define SESSION_AUTHOK  (1 << 5)        // Have those credentials been authenticated
 
+#define PPPCBACT_AUTHREQ  1
+#define PPPCBACT_AUTHOK   2
+#define PPPCBACT_IPCPOK   3
+#define PPPCBACT_SHUTDOWN 4
+
 #include "pppoe.h"
 #include "event.h"
 

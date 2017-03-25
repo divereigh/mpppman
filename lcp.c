@@ -242,6 +242,7 @@ void sendLCPConfigReq(PPPSession *pppSession)
 void lcp_open(PPPSession *pppSession)
 {
 	// transition to Authentication or Network phase: 
+	// If lcp_authtype==0, then no further authentication required
 	pppSession->ppp.phase = pppSession->lcp_authtype ? Authenticate : Network;
 
 	LOG(3, pppSession->pppoeSession, "LCP: Opened, phase %s\n", ppp_phase(pppSession->ppp.phase));

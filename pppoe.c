@@ -1,4 +1,5 @@
 #include "config.h"
+// TODO: Sort out retransmission of lost PADx packets
 
 #ifdef HAVE_UNISTD_H
 #include <unistd.h>

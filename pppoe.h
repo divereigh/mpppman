@@ -31,6 +31,7 @@ typedef struct InterfaceStruct {
 	int sessionSock;		/* Socket for session frames */
 	int clientOK;			/* Client requests allowed (PADI, PADR) */
 	int acOK;			/* AC replies allowed (PADO, PADS) */
+	int lastPacketType;		/* Last packet type sent (PADI, PADO, PADR, PADS) */
 	struct event *discoveryEvent;	/* Event for packet to be read */
 	struct event *sessionEvent;	/* Event for packet to be read */
 	discovery_cb_func discovery_cb;	/* Function called on successful/teardown discovery */

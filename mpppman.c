@@ -71,25 +71,45 @@ void cb_func(evutil_socket_t fd, short what, void *arg)
 PPPoESession *downstream=NULL;
 PPPoESession *upstream=NULL;
 
+/* Stages of sessions are:
+Downstream
+- pppoe accepted set trigger (1)
+- LCP negotiated (with PAP Auth)
+- Recieve PAP auth attempt, set trigger (2)
+- Trigger (3) Send auth response
+- Trigger (4) Negotiate IPCP, set trigger (5)
+- Link sessions
+
+Upstream
+- Trigger (1): Initiate PPPoE
+- LCP Negotiate
+- Trigger (2): Send auth request
+- (Expect an LCP renegotiate here)
+- Wait for Auth response set trigger (3)
+- IPCP Negotiate trigger (4)
+- Trigger (5) Link sessions
+*/
 void ppp_cb(PPPSession *pppSession, int action)
 {
 	LOG(3, pppSession->pppoeSession, "ppp_cb called: action=%d\n", action);
 	if (((pppSession->flags & SESSION_CLIENT)==0) && pppSession->pppoeSession == downstream) {
-		if (action==1) {
+		// Downstream
+		if (action==PPPCBACT_AUTHREQ) {
 			if (upstream && upstream->pppSession) {
-				LOG(3, pppSession->pppoeSession, "trigger upstream auth\n");
-				strcpy(upstream->pppSession->user, downstream->pppSession->user);
-				strcpy(upstream->pppSession->pass, downstream->pppSession->pass);
-				upstream->pppSession->flags |= SESSION_GOTAUTH;
-				do_auth(upstream->pppSession);
+				LOG(3, pppSession->pppoeSession, "We have downstream auth info - trigger upstream auth\n");
+				// strcpy(upstream->pppSession->user, downstream->pppSession->user);
+				// strcpy(upstream->pppSession->pass, downstream->pppSession->pass);
+				// upstream->pppSession->flags |= SESSION_GOTAUTH;
+				// downstream->pppSession->flags |= SESSION_GOTAUTH;
+				set_auth(upstream->pppSession);
 			}
-		} else if (action==3) {
+		} else if (action==PPPCBACT_IPCPOK) {
 			if (upstream && upstream->pppSession) {
 				LOG(3, pppSession->pppoeSession, "Link sessions\n");
 				upstream->pppSession->link=downstream->pppSession;
 				downstream->pppSession->link=upstream->pppSession;
 			}
-		} else if (action==4) {
+		} else if (action==PPPCBACT_SHUTDOWN) {
 			if (upstream && upstream->pppSession) {
 				LOG(3, pppSession->pppoeSession, "Un-link sessions and shutdown upstream\n");
 				upstream->pppSession->link=NULL;
@@ -98,18 +118,44 @@ void ppp_cb(PPPSession *pppSession, int action)
 			}
 		}
 	} else if (((pppSession->flags & SESSION_CLIENT)) && pppSession->pppoeSession == upstream) {
-		if (action==2) {
+		// Upstream
+		if (action==PPPCBACT_AUTHREQ) {
+			if (downstream && downstream->pppSession && (downstream->pppSession->flags & SESSION_GOTAUTH)) {
+				LOG(3, pppSession->pppoeSession, "Fetch auth info from downstream\n");
+				strcpy(upstream->pppSession->user, downstream->pppSession->user);
+				strcpy(upstream->pppSession->pass, downstream->pppSession->pass);
+				upstream->pppSession->flags |= SESSION_GOTAUTH;
+			}
+		} else if (action==PPPCBACT_AUTHOK) {
 			if (downstream && downstream->pppSession) {
+				LOG(3, pppSession->pppoeSession, "We have authok, flag this with downstream\n");
 				LOG(3, pppSession->pppoeSession, "trigger downstream auth\n");
 				downstream->pppSession->flags |= SESSION_AUTHOK;
-				// Wait for another auth request
+				upstream->pppSession->flags |= SESSION_AUTHOK;
+				// Wait for next auth request from downstream
 			}
-		} else if (action==3) {
+		} else if (action==PPPCBACT_IPCPOK) {
 			if (downstream && downstream->pppSession) {
 				LOG(3, pppSession->pppoeSession, "trigger downstream IPCP\n");
-				downstream->pppSession->ip_local=upstream->pppSession->ip_remote;
-				downstream->pppSession->ip_remote=upstream->pppSession->ip_local;
-				sendipcp(downstream->pppSession);
+				if (downstream->pppSession->ip_local != upstream->pppSession->ip_remote
+					|| downstream->pppSession->ip_remote != upstream->pppSession->ip_local) {
+					// Different (or new) IP addresses from upstream
+					downstream->pppSession->ip_local=upstream->pppSession->ip_remote;
+					downstream->pppSession->ip_remote=upstream->pppSession->ip_local;
+					sendipcp(downstream->pppSession);
+				} else {
+					// Just link the sessions back together
+					LOG(3, pppSession->pppoeSession, "Link sessions\n");
+					upstream->pppSession->link=downstream->pppSession;
+					downstream->pppSession->link=upstream->pppSession;
+				}
+			}
+		} else if (action==PPPCBACT_SHUTDOWN) {
+			if (downstream && downstream->pppSession) {
+				LOG(3, pppSession->pppoeSession, "Unlink and restart upstream session\n");
+				upstream->pppSession->link=NULL;
+				downstream->pppSession->link=NULL;
+				discoveryClient((PPPoEInterface *) pppSession->pppoeSession->iface, NULL, NULL, 10); // Lose the const
 			}
 		}
 	}
@@ -122,6 +168,7 @@ void discovery_cb(PPPoESession *pppoeSession, int action)
 		downstream=pppoeSession;
 		pppServer(pppoeSession, ppp_cb);
 
+		// Trigger 1
 		discoveryClient((PPPoEInterface *) pppoeSession->iface, NULL, NULL, 10); // Lose the const
 	} else {
 		LOG(3, pppoeSession, "discover client session started %s/%s\n", pppoeSession->ac_name, pppoeSession->service_name);

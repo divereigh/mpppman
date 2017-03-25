@@ -50,6 +50,7 @@ struct PPPoESessionStruct {
 	unsigned char peerMac[ETH_ALEN];	/* Peer's MAC address */
 	PPPSession *pppSession;			/* Matching PPP Session */
 	int server;				/* True if this we are a server */
+	int closing;				/* Is this session closing */
 	char ac_name[64];			/* Server AC name */
 	char service_name[64];			/* Service name */
 };

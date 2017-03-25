@@ -110,6 +110,7 @@ void ppp_cb(PPPSession *pppSession, int action)
 				downstream->pppSession->link=upstream->pppSession;
 			}
 		} else if (action==PPPCBACT_SHUTDOWN) {
+			downstream->closing=1;
 			if (upstream && upstream->pppSession) {
 				LOG(3, pppSession->pppoeSession, "Un-link sessions and shutdown upstream\n");
 				upstream->pppSession->link=NULL;
@@ -151,7 +152,8 @@ void ppp_cb(PPPSession *pppSession, int action)
 				}
 			}
 		} else if (action==PPPCBACT_SHUTDOWN) {
-			if (downstream && downstream->pppSession) {
+			upstream->closing=1;
+			if (downstream && downstream->pppSession && downstream->closing==0) {
 				LOG(3, pppSession->pppoeSession, "Unlink and restart upstream session\n");
 				upstream->pppSession->link=NULL;
 				downstream->pppSession->link=NULL;
@@ -163,17 +165,27 @@ void ppp_cb(PPPSession *pppSession, int action)
 
 void discovery_cb(PPPoESession *pppoeSession, int action)
 {
-	if (pppoeSession->server) {
-		LOG(3, pppoeSession, "discover server session started %s/%s\n", pppoeSession->ac_name, pppoeSession->service_name);
-		downstream=pppoeSession;
-		pppServer(pppoeSession, ppp_cb);
+	if (action) {
+		if (pppoeSession->server) {
+			LOG(3, pppoeSession, "discover server session started %s/%s\n", pppoeSession->ac_name, pppoeSession->service_name);
+			downstream=pppoeSession;
+			pppServer(pppoeSession, ppp_cb);
 
-		// Trigger 1
-		discoveryClient((PPPoEInterface *) pppoeSession->iface, NULL, NULL, 10); // Lose the const
+			// Trigger 1
+			discoveryClient((PPPoEInterface *) pppoeSession->iface, NULL, NULL, 10); // Lose the const
+		} else {
+			LOG(3, pppoeSession, "discover client session started %s/%s\n", pppoeSession->ac_name, pppoeSession->service_name);
+			upstream=pppoeSession;
+			pppClient(pppoeSession, ppp_cb);
+		}
 	} else {
-		LOG(3, pppoeSession, "discover client session started %s/%s\n", pppoeSession->ac_name, pppoeSession->service_name);
-		upstream=pppoeSession;
-		pppClient(pppoeSession, ppp_cb);
+		// Shutdown session
+		if (pppoeSession==downstream) {
+			downstream=NULL;
+		}
+		if (pppoeSession==upstream) {
+			upstream=NULL;
+		}
 	}
 }
 

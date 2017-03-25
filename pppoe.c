@@ -1019,6 +1019,7 @@ void discoveryClient(PPPoEInterface *iface, char *ac_name, char *service_name, i
 void pppoe_sessionkill(const PPPoESession *pppoeSession)
 {
 	pppoe_send_PADT(pppoeSession->iface, pppoeSession->sid, pppoeSession->peerMac);
+	(pppoeSession->iface->discovery_cb)((void *) pppoeSession, 0); // OK I know it's a const
 	memset((void *) pppoeSession, 0, sizeof(PPPoESession)); // OK I know it's a const
 }
 

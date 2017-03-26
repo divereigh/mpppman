@@ -40,5 +40,6 @@ extern int debuglevel;
 extern FILE *log_stream;
 char *fmtaddr(in_addr_t addr, int n);
 char *fmtMacAddr(const uint8_t *pMacAddr);
+char *fmtBinary(const uint8_t *pData, size_t len);
 
 #endif

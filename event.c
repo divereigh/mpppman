@@ -44,5 +44,5 @@ int startTimer(struct event *ev, int secs)
 
 int stopTimer(struct event *ev)
 {
-	return(event_del(ev));
+	return((ev) ? event_del(ev) : -1);
 }

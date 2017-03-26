@@ -54,7 +54,10 @@
 #define SESS_CODE           0x00
 #define DEFAULT_PPPOE_AC_NAME "mpppman"
 
+static int init_done=0;
 PPPoESession pppoe_sessions[MAX_PPPOE_SESSION];
+
+static uint32_t hostUniq=0;	// Contains an incrementing Host Uniq
 
 static uint8_t bc_addr[ETH_ALEN] = {0xff, 0xff, 0xff, 0xff, 0xff, 0xff};
 static uint8_t mt_addr[ETH_ALEN] = {0x00, 0x00, 0x00, 0x00, 0x00, 0x00};
@@ -78,6 +81,9 @@ enum
 	INDEX_PADT,
 	INDEX_SESS
 };
+
+static void pppoe_send_PADI(const PPPoEInterface *iface);
+static void pppoe_send_PADT(const PPPoEInterface *iface, uint16_t sid, const uint8_t *addr);
 
 char * get_string_codepad(uint8_t codepad)
 {
@@ -112,6 +118,13 @@ char * get_string_codepad(uint8_t codepad)
 	return ptrch;
 }
 
+static void initDiscovery() {
+	memset(pppoe_sessions, 0, sizeof(PPPoESession) * MAX_PPPOE_SESSION);
+	hostUniq=getpid();
+
+	init_done=1;
+}
+
 void PPPoE_cb_func(evutil_socket_t fd, short what, void *arg)
 {
 	uint8_t buf[65536];
@@ -136,9 +149,9 @@ void PPPoE_cb_func(evutil_socket_t fd, short what, void *arg)
 	}
 }
 
-/* Find a session that has the given session id, 0 will find a free session
+/* Find a session that has the given session id & MacAddr
 */
-PPPoESession *pppoe_find_session(uint16_t sid, uint8_t *addr)
+static PPPoESession *pppoeFindSessionBySID(uint16_t sid, uint8_t *addr)
 {
 	int i;
 
@@ -150,15 +163,95 @@ PPPoESession *pppoe_find_session(uint16_t sid, uint8_t *addr)
 	return(NULL);
 }
 
+/* Find a session that has the given Host Uniq
+*/
+static PPPoESession *pppoeFindSessionByHostUniq(uint8_t *hostUniq, size_t hostUniqLen)
+{
+	int i;
+
+	for (i=0; i<MAX_PPPOE_SESSION; i++) {
+		if (pppoe_sessions[i].hostUniqLen == hostUniqLen) {
+			if (memcmp(pppoe_sessions[i].hostUniq, hostUniq, hostUniqLen)==0) {
+				return(&pppoe_sessions[i]);
+			}
+		}
+	}
+	return(NULL);
+}
+
+/* Find a free session
+*/
+static PPPoESession *pppoeFindSessionFree()
+{
+	int i;
+
+	for (i=0; i<MAX_PPPOE_SESSION; i++) {
+		// LOG(0, NULL, "Checking %d: sid=%d, hostUniqLen=%d\n", i, pppoe_sessions[i].sid, (long) pppoe_sessions[i].hostUniqLen);
+		if (pppoe_sessions[i].sid==0 && pppoe_sessions[i].hostUniqLen==0) {
+			return(&pppoe_sessions[i]);
+		}
+	}
+	return(NULL);
+}
+
 /* Allocate and fill new session - returns PPPoESession */
-PPPoESession * pppoe_new_session(const PPPoEInterface *iface, const uint8_t *addr, uint16_t sid)
+PPPoESession * pppoeNewSession(const PPPoEInterface *iface, uint8_t *hostUniq, size_t hostUniqLen)
 {
 	PPPoESession *pppoeSession;
 
-	if (sid && (pppoeSession=pppoe_find_session(sid, NULL)) != NULL) {
+	if (hostUniq!=NULL && (pppoeSession=pppoeFindSessionByHostUniq(hostUniq, hostUniqLen)) != NULL) {
+		return(NULL);
+	} else {
+		if ((pppoeSession=pppoeFindSessionFree()) == NULL) {
+			LOG(0, NULL, "pppoeNewSession: No free PPPoESession available\n");
+			return(NULL);
+		}
+	}
+	
+	memcpy(pppoeSession->hostUniq, hostUniq, hostUniqLen);
+	pppoeSession->hostUniqLen=hostUniqLen;
+	pppoeSession->iface=iface;
+	LOG(3, pppoeSession, "PPPoESession allocated with hostUniq=%s\n", fmtBinary(pppoeSession->hostUniq, hostUniqLen));
+	return(pppoeSession);
+}
+
+int pppoeIsSessionUnique(char *avc_id)
+{
+	int i;
+
+	for (i=0; i<MAX_PPPOE_SESSION; i++) {
+		// LOG(0, NULL, "Checking %d: sid=%d, hostUniqLen=%d\n", i, pppoe_sessions[i].sid, (long) pppoe_sessions[i].hostUniqLen);
+		if ((pppoe_sessions[i].sid!=0 || pppoe_sessions[i].hostUniqLen!=0) && strcmp(avc_id, pppoe_sessions[i].avc_id)==0) {
+			return(0);
+		}
+	}
+	return(1);
+}
+
+void pppoeSessionKill(PPPoESession *pppoeSession)
+{
+	if (pppoeSession->sid) {
+		/* Only do this for open sessions */
+		pppoe_send_PADT(pppoeSession->iface, pppoeSession->sid, pppoeSession->peerMac);
+		(pppoeSession->iface->discovery_cb)((void *) pppoeSession, 0); // OK I know it's a const
+	}
+	if (pppoeSession->timerEvent) {
+		stopTimer(pppoeSession->timerEvent);
+		pppoeSession->timerEvent=NULL;
+	}
+	memset((void *) pppoeSession, 0, sizeof(PPPoESession)); // OK I know it's a const
+}
+
+#if 0
+/* Allocate and fill new session - returns PPPoESession */
+PPPoESession * pppoeNewSession(const PPPoEInterface *iface, const uint8_t *addr, uint16_t sid)
+{
+	PPPoESession *pppoeSession;
+
+	if (sid && (pppoeSession=pppoeFindSessionBySID(sid, NULL)) != NULL) {
 		memset(pppoeSession, 0, sizeof(PPPoESession));
 	} else {
-		if ((pppoeSession=pppoe_find_session(0, NULL)) == NULL) {
+		if ((pppoeSession=pppoeFindSessionFree()) == NULL) {
 			LOG(0, NULL, "No free PPPoESession available\n");
 		}
 	}
@@ -166,7 +259,7 @@ PPPoESession * pppoe_new_session(const PPPoEInterface *iface, const uint8_t *add
 	if (sid==0) {
 		do {
 			sid=random() & 0xffff; // Lower 16 bits
-		} while(pppoe_find_session(sid, NULL)!=NULL);
+		} while(pppoeFindSessionBySID(sid, NULL)!=NULL);
 	}
 
 	pppoeSession->sid=sid;
@@ -175,6 +268,7 @@ PPPoESession * pppoe_new_session(const PPPoEInterface *iface, const uint8_t *add
 	LOG(3, pppoeSession, "PPPoESession allocated with sid=0x%04x\n", pppoeSession->sid);
 	return(pppoeSession);
 }
+#endif
 
 /**********************************************************************
 *%FUNCTION: openPPPoEInterface
@@ -305,7 +399,7 @@ static void pppoe_recv_PADT(const PPPoEInterface *iface, uint8_t *pack, int size
 		return;
 	}
 
-	if ((pppoeSession=pppoe_find_session(sid, ethhdr->h_source))==NULL)
+	if ((pppoeSession=pppoeFindSessionBySID(sid, ethhdr->h_source))==NULL)
 	{
 		LOG(3, NULL, "Received PADT packet with unknown session ID (0x%04x) - ignoring\n", sid);
 		return;
@@ -315,7 +409,7 @@ static void pppoe_recv_PADT(const PPPoEInterface *iface, uint8_t *pack, int size
 	if (pppoeSession->pppSession) {
 		sessionshutdown(pppoeSession->pppSession, 0, "Received PADT");
 	} else {
-		pppoe_sessionkill(pppoeSession);
+		pppoeSessionKill(pppoeSession);
 	}
 }
 
@@ -381,14 +475,32 @@ void pppoe_sess_send(const PPPoESession *pppoeSession, const uint8_t *pack, uint
 		LOG(0, pppoeSession, "pppoe_sess_send: short write %i/%i\n", n,l);
 }
 
+static void pppoe_timer_cb(evutil_socket_t fd, short what, void *arg)
+{
+	PPPoESession *pppoeSession=(PPPoESession *) arg;
+	const PPPoEInterface *iface=pppoeSession->iface;
+	int server=pppoeSession->server;
+
+	LOG(3, NULL, "pppoe_timer_cb called\n");
+	/* Destroy that session and start a new one */
+	stopTimer(pppoeSession->timerEvent);
+	memset(pppoeSession, 0, sizeof(PPPoESession));
+	if (server==0) {
+		/* Only restart if in client mode */
+		pppoe_send_PADI(iface);
+	}
+}
+
 // Only used in client mode
 static void pppoe_send_PADI(const PPPoEInterface *iface)
 {
 	uint8_t pack[ETHER_MAX_LEN];
-	/* Allows for a 64-bit PID */
-	uint32_t hostUniq;
+	PPPoESession *pppoeSession;
 
-	hostUniq=getpid();
+	hostUniq++;
+	if(hostUniq==0) {
+		hostUniq=1;
+	}
 
 	setup_header(pack, iface->mac, bc_addr, PADI_CODE, 0, ETH_P_PPP_DISC);
 
@@ -397,23 +509,32 @@ static void pppoe_send_PADI(const PPPoEInterface *iface)
 	add_tag(pack, PTT_SRV_NAME, (uint8_t *) iface->client_service_name, strlen(iface->client_service_name));
 	//end_tag(pack);
 
+	if ((pppoeSession=pppoeNewSession(iface, (uint8_t *) &hostUniq, sizeof(hostUniq)))==NULL) {
+		LOG(0, NULL, "pppoe: Failed to send PADI - No free sessions\n");
+		return;
+	}
+
+	pppoeSession->timerEvent=newTimer(pppoe_timer_cb, pppoeSession);
+	startTimer(pppoeSession->timerEvent, 2);
+	pppoeSession->server=0;
+	pppoeSession->lastPacketType=PADI_CODE;
 	pppoe_disc_send(iface, pack);
 }
 
 // Only used in server mode
-static void pppoe_send_PADO(const PPPoEInterface *iface, const uint8_t *addr, const struct pppoe_tag *host_uniq, const struct pppoe_tag *relay_sid, const struct pppoe_tag *service_name)
+static void pppoe_send_PADO(PPPoESession *pppoeSession, const uint8_t *addr, const struct pppoe_tag *host_uniq, const struct pppoe_tag *relay_sid, const struct pppoe_tag *service_name)
 {
 	uint8_t pack[ETHER_MAX_LEN];
 	hasht hash;
 
-	setup_header(pack, iface->mac, addr, PADO_CODE, 0, ETH_P_PPP_DISC);
+	setup_header(pack, pppoeSession->iface->mac, addr, PADO_CODE, 0, ETH_P_PPP_DISC);
 
-	add_ac_name_tag(pack, iface->server_ac_name);
+	add_ac_name_tag(pack, pppoeSession->iface->server_ac_name);
 
 	if (service_name)
 		add_tag2(pack, service_name);
 
-	pppoe_gen_cookie(iface->mac, addr, hash);
+	pppoe_gen_cookie(pppoeSession->iface->mac, addr, hash);
 	add_tag(pack, PTT_AC_COOKIE, hash, 16);
 
 	if (host_uniq)
@@ -422,18 +543,19 @@ static void pppoe_send_PADO(const PPPoEInterface *iface, const uint8_t *addr, co
 	if (relay_sid)
 		add_tag2(pack, relay_sid);
 
-	pppoe_disc_send(iface, pack);
+	pppoeSession->lastPacketType=PADO_CODE;
+	pppoe_disc_send(pppoeSession->iface, pack);
 }
 
 // Only used in server mode
-static void pppoe_send_PADS(const PPPoEInterface *iface, uint16_t sid, const uint8_t *addr, const struct pppoe_tag *host_uniq, const struct pppoe_tag *relay_sid, const struct pppoe_tag *service_name)
+static void pppoe_send_PADS(PPPoESession *pppoeSession, uint16_t sid, const uint8_t *addr, const struct pppoe_tag *host_uniq, const struct pppoe_tag *relay_sid, const struct pppoe_tag *service_name)
 {
 	uint8_t pack[ETHER_MAX_LEN];
 	char pppoe_ac_name[64];
 
-	setup_header(pack, iface->mac, addr, PADS_CODE, sid, ETH_P_PPP_DISC);
+	setup_header(pack, pppoeSession->iface->mac, addr, PADS_CODE, sid, ETH_P_PPP_DISC);
 
-	add_ac_name_tag(pack, iface->server_ac_name);
+	add_ac_name_tag(pack, pppoeSession->iface->server_ac_name);
 
 	add_tag2(pack, service_name);
 
@@ -443,16 +565,17 @@ static void pppoe_send_PADS(const PPPoEInterface *iface, uint16_t sid, const uin
 	if (relay_sid)
 		add_tag2(pack, relay_sid);
 
-	pppoe_disc_send(iface, pack);
+	pppoeSession->lastPacketType=PADS_CODE;
+	pppoe_disc_send(pppoeSession->iface, pack);
 }
 
 
 // Only used in client mode
-static void pppoe_send_PADR(const PPPoEInterface *iface, uint16_t sid, const uint8_t *addr, const struct pppoe_tag *host_uniq, const struct pppoe_tag *service_name, const struct pppoe_tag *ac_cookie_tag)
+static void pppoe_send_PADR(PPPoESession *pppoeSession, uint16_t sid, const uint8_t *addr, const struct pppoe_tag *host_uniq, const struct pppoe_tag *service_name, const struct pppoe_tag *ac_cookie_tag)
 {
 	uint8_t pack[ETHER_MAX_LEN];
 
-	setup_header(pack, iface->mac, addr, PADR_CODE, sid, ETH_P_PPP_DISC);
+	setup_header(pack, pppoeSession->iface->mac, addr, PADR_CODE, sid, ETH_P_PPP_DISC);
 
 	add_tag2(pack, service_name);
 
@@ -461,8 +584,8 @@ static void pppoe_send_PADR(const PPPoEInterface *iface, uint16_t sid, const uin
 	if (host_uniq)
 		add_tag2(pack, host_uniq);
 	
-	pppoe_disc_send(iface, pack);
-	startTimer(iface->timerEvent, 2);
+	pppoeSession->lastPacketType=PADR_CODE;
+	pppoe_disc_send(pppoeSession->iface, pack);
 }
 
 // Server or client mode
@@ -489,6 +612,7 @@ static void pppoe_recv_PADI(const PPPoEInterface *iface, uint8_t *pack, int size
 	struct pppoe_tag *relay_sid_tag = NULL;
 	struct pppoe_tag *service_name_tag = NULL;
 	int n, service_match = 0;
+	PPPoESession *pppoeSession;
 	int len;
 
 	if (!iface->acOK) {
@@ -544,7 +668,15 @@ static void pppoe_recv_PADI(const PPPoEInterface *iface, uint8_t *pack, int size
 		return;
 	}
 
-	pppoe_send_PADO(iface, ethhdr->h_source, host_uniq_tag, relay_sid_tag, service_name_tag);
+	/* Use the peerMAC as the hostUniq */
+	if ((pppoeSession=pppoeNewSession(iface, (uint8_t *) ethhdr->h_source, ETH_ALEN))==NULL) {
+		return;
+	}
+
+	pppoeSession->timerEvent=newTimer(pppoe_timer_cb, pppoeSession);
+	pppoeSession->server=1;
+	startTimer(pppoeSession->timerEvent, 2);
+	pppoe_send_PADO(pppoeSession, ethhdr->h_source, host_uniq_tag, relay_sid_tag, service_name_tag);
 }
 
 // Only used in client mode
@@ -557,8 +689,12 @@ static void pppoe_recv_PADO(const PPPoEInterface *iface, uint8_t *pack, int size
 	struct pppoe_tag *relay_sid_tag = NULL;
 	struct pppoe_tag *ac_cookie_tag = NULL;
 	struct pppoe_tag *service_name_tag = NULL;
+	struct pppoe_tag *vendor_tag = NULL;
 	int n, service_match = 0;
-
+	uint32_t recvHostUniq;
+	char avc_id[16];
+	PPPoESession *pppoeSession;
+	
 	if (!iface->clientOK) {
 		LOG(3, NULL, "Ignoring PADO - not in client mode\n");
 		return;
@@ -609,12 +745,31 @@ static void pppoe_recv_PADO(const PPPoEInterface *iface, uint8_t *pack, int size
 				break;
 			case PTT_HOST_UNIQ:
 				host_uniq_tag = tag;
+				if (ntohs(tag->tag_len) == sizeof(recvHostUniq)) {
+					memcpy((void *) &recvHostUniq, tag->tag_data, ntohs(tag->tag_len));
+				} else {
+					recvHostUniq=0;
+				}
 				break;
 			case PTT_AC_COOKIE:
 				ac_cookie_tag = tag;
 				break;
 			case PTT_RELAY_SID:
 				relay_sid_tag = tag;
+				break;
+			case PTT_VENDOR:
+				vendor_tag = tag;
+				if (ntohs(tag->tag_len) == 21) {
+					uint32_t vendor_id=ntohl(*((uint32_t *) tag->tag_data));
+					if (vendor_id==3561) {
+						uint8_t *p=tag->tag_data+sizeof(uint32_t);
+						if (p[0]==1 && p[1]==15) {
+							memcpy(avc_id, p+2, 15);
+							avc_id[15]='\0';
+							LOG(3, NULL, "avc_id=%s\n", avc_id);
+						}
+					}
+				}
 				break;
 		}
 	}
@@ -626,9 +781,24 @@ static void pppoe_recv_PADO(const PPPoEInterface *iface, uint8_t *pack, int size
 		return;
 	}
 
-	// TODO - check hostUniq
+	if ((pppoeSession=pppoeFindSessionByHostUniq((uint8_t *) &recvHostUniq, sizeof(recvHostUniq)))==NULL) {
+		LOG(0, NULL, "Cannot find session for HostUniq: %s\n", fmtBinary((uint8_t *) &recvHostUniq, sizeof(recvHostUniq)));
+		return;
+	}
 
-	pppoe_send_PADR(iface, hdr->sid, ethhdr->h_source, host_uniq_tag, service_name_tag, ac_cookie_tag);
+	if (pppoeSession->lastPacketType!=PADI_CODE) {
+		LOG(3, NULL, "pppoe: Ignoring duplicate response\n");
+		return;
+	}
+
+	if (!pppoeIsSessionUnique(avc_id)) {
+		LOG(3, NULL, "pppoe: Ignoring response from existing link\n");
+	}
+	strcpy(pppoeSession->avc_id, avc_id);
+
+	/* Restart timer */
+	startTimer(pppoeSession->timerEvent, 2);
+	pppoe_send_PADR(pppoeSession, hdr->sid, ethhdr->h_source, host_uniq_tag, service_name_tag, ac_cookie_tag);
 }
 
 // Only used in server mode
@@ -723,7 +893,18 @@ static void pppoe_recv_PADR(const PPPoEInterface *iface, uint8_t *pack, int size
 		return;
 	}
 
-	pppoeSession=pppoe_new_session(iface, ethhdr->h_source, 0);
+	do {
+		sid=random() & 0xffff; // Lower 16 bits
+	} while(pppoeFindSessionBySID(sid, NULL)!=NULL);
+
+	if ((pppoeSession=pppoeFindSessionByHostUniq((uint8_t *) ethhdr->h_source, ETH_ALEN))==NULL) {
+		LOG(0, NULL, "Cannot find session for HostUniq: %s\n", fmtMacAddr((uint8_t *) ethhdr->h_source));
+		return;
+	}
+	pppoeSession->sid=sid;
+	memcpy(pppoeSession->peerMac, ethhdr->h_source, ETH_ALEN);
+	stopTimer(pppoeSession->timerEvent);
+
 #if 0
 	sid = sessionfree;
 	sessionfree = session[sid].next;
@@ -755,9 +936,8 @@ static void pppoe_recv_PADR(const PPPoEInterface *iface, uint8_t *pack, int size
 
 	memcpy(session[sid].src_hwaddr, ethhdr->h_source, ETH_ALEN);
 #endif
-	pppoe_send_PADS(iface, pppoeSession->sid, ethhdr->h_source, host_uniq_tag, relay_sid_tag, service_name_tag);
+	pppoe_send_PADS(pppoeSession, pppoeSession->sid, ethhdr->h_source, host_uniq_tag, relay_sid_tag, service_name_tag);
 
-	pppoeSession->server=1;
 	(*iface->discovery_cb)(pppoeSession, 1);
 }
 
@@ -772,6 +952,7 @@ static void pppoe_recv_PADS(const PPPoEInterface *iface, uint8_t *pack, int size
 	// struct pppoe_tag *service_name_tag = NULL;
 	int n, service_match = 0;
 	PPPoESession *pppoeSession;
+	uint32_t recvHostUniq;
 	uint16_t sid;
 
 	if (!iface->clientOK) {
@@ -818,6 +999,11 @@ static void pppoe_recv_PADS(const PPPoEInterface *iface, uint8_t *pack, int size
 				break;
 			case PTT_HOST_UNIQ:
 				host_uniq_tag = tag;
+				if (ntohs(tag->tag_len) == sizeof(recvHostUniq)) {
+					memcpy((void *) &recvHostUniq, tag->tag_data, ntohs(tag->tag_len));
+				} else {
+					recvHostUniq=0;
+				}
 				break;
 			case PTT_RELAY_SID:
 				relay_sid_tag = tag;
@@ -828,14 +1014,20 @@ static void pppoe_recv_PADS(const PPPoEInterface *iface, uint8_t *pack, int size
 	if (!service_match)
 	{
 		LOG(3, NULL, "pppoe: Service-Name mismatch\n");
+		// TODO - fix this
 		pppoe_send_err(iface, ethhdr->h_source, host_uniq_tag, relay_sid_tag, PADS_CODE, PTT_SRV_ERR);
 		return;
 	}
 
-	stopTimer(iface->timerEvent);
 	sid = ntohs(hdr->sid);
-	pppoeSession=pppoe_new_session(iface, ethhdr->h_source, sid);
+	if ((pppoeSession=pppoeFindSessionByHostUniq((uint8_t *) &recvHostUniq, sizeof(recvHostUniq)))==NULL) {
+		LOG(0, NULL, "Cannot find session for HostUniq: %s\n", fmtBinary((uint8_t *) &recvHostUniq, sizeof(recvHostUniq)));
+		return;
+	}
+	pppoeSession->sid=sid;
+	memcpy(pppoeSession->peerMac, ethhdr->h_source, ETH_ALEN);
 	pppoeSession->server=0;
+	stopTimer(pppoeSession->timerEvent);
 	(*iface->discovery_cb)(pppoeSession, 1);
 }
 
@@ -938,7 +1130,7 @@ void processSession(const PPPoEInterface *iface, uint8_t *pack, int size)
 
 	LOG_HEX(5, NULL, "RCV PPPOE Sess", pack, size);
 
-	if ((pppoeSession=pppoe_find_session(sid, ethhdr->h_source))==NULL)
+	if ((pppoeSession=pppoeFindSessionBySID(sid, ethhdr->h_source))==NULL)
 	{
 		LOG(0, NULL, "Received pppoe packet with invalid session ID (0x%04x)\n", sid);
 		pppoe_send_PADT(iface, sid, ethhdr->h_source);
@@ -979,6 +1171,10 @@ void pppoe_incr_header_length(uint8_t *b, int n)
 
 void discoveryServer(PPPoEInterface *iface, char *ac_name, char *service_name)
 {
+	if (!init_done) {
+		initDiscovery();
+	}
+
 	if (ac_name) {
 		strncpy(iface->server_ac_name, ac_name, sizeof(iface->server_ac_name));
 	} else {
@@ -992,16 +1188,12 @@ void discoveryServer(PPPoEInterface *iface, char *ac_name, char *service_name)
 	iface->acOK=1;
 }
 
-static void pppoe_timer_cb(evutil_socket_t fd, short what, void *arg)
-{
-	PPPoEInterface *iface=(PPPoEInterface *) arg;
-	LOG(3, NULL, "pppoe_timer_cb called\n");
-	pppoe_send_PADI(iface);
-	startTimer(iface->timerEvent, 2);
-}
-
 void discoveryClient(PPPoEInterface *iface, char *ac_name, char *service_name, int attempts)
 {
+	if (!init_done) {
+		initDiscovery();
+	}
+
 	if (ac_name) {
 		strncpy(iface->client_ac_name, ac_name, sizeof(iface->client_ac_name));
 	}
@@ -1011,15 +1203,19 @@ void discoveryClient(PPPoEInterface *iface, char *ac_name, char *service_name, i
 	}
 
 	iface->clientOK=1;
-	iface->timerEvent=newTimer(pppoe_timer_cb, iface);
 	pppoe_send_PADI(iface);
-	startTimer(iface->timerEvent, 2);
 }
 
-void pppoe_sessionkill(const PPPoESession *pppoeSession)
+int discoveryClientCount()
 {
-	pppoe_send_PADT(pppoeSession->iface, pppoeSession->sid, pppoeSession->peerMac);
-	(pppoeSession->iface->discovery_cb)((void *) pppoeSession, 0); // OK I know it's a const
-	memset((void *) pppoeSession, 0, sizeof(PPPoESession)); // OK I know it's a const
-}
+	int i;
+	int count=0;
 
+	for (i=0; i<MAX_PPPOE_SESSION; i++) {
+		if (pppoe_sessions[i].sid!=0 && pppoe_sessions[i].server==0) {
+			count++;
+		}
+	}
+	return(count);
+	
+}

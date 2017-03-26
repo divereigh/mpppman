@@ -108,6 +108,8 @@ void dumplcp(const PPPoESession *pppoe, uint8_t *p, int l)
 					if (ep_type==IPADDR) {
 						struct in_addr *ipaddr = (struct in_addr *)(o + 3);
 						LOG(4, pppoe, "    %s ipaddr: %s\n", ppp_lcp_option(type), inet_ntoa(*ipaddr));
+					} else if (ep_type==PPPMAGIC) {
+						LOG(4, pppoe, "    %s pppmagic: %s\n", ppp_lcp_option(type), fmtBinary(o + 3, o[1]));
 					} else {
 						LOG(4, pppoe, "    %s unknown: %d\n", ppp_lcp_option(type), ep_type);
 					}
@@ -225,7 +227,7 @@ void sendLCPConfigReq(PPPSession *pppSession)
         if (pppSession->mp_epdis)
         {
 		*l++ = 19; *l++ = 7;	// Multilink Endpoint Discriminator (length 7)
-		*l++ = IPADDR;	// Endpoint Discriminator class
+		*l++ = PPPMAGIC;	// Endpoint Discriminator class
 		*(uint32_t *) l = htonl(pppSession->mp_epdis);
 		l += 4;
 	}

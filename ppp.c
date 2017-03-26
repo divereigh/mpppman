@@ -33,6 +33,8 @@ int ppp_max_configure=10;
 int radius_authtypes=AUTHPAP;
 int radius_authprefer=AUTHPAP;
 int MRU=1462;
+static uint32_t mp_epdis_magic=0;
+
 
 /* Find a session that has the given session id, 0 will find a free session
 */
@@ -130,7 +132,10 @@ PPPSession * ppp_new_session(const PPPoESession *pppoeSession, uint8_t flags)
 		// Set multilink options before sending initial LCP packet
 		pppSession->mp_mrru = 1614;
 		// pppSession->mp_epdis = ntohl(config->iftun_address ? config->iftun_address : my_address);
-		pppSession->mp_epdis = htonl(0x01010101);
+		if (mp_epdis_magic==0) {
+			mp_epdis_magic=(random() & 0xffff) << 16 + (random() & 0xffff);
+		}
+		pppSession->mp_epdis = mp_epdis_magic;
 	}
 
 	// sendlcp(pppSession);
@@ -523,7 +528,7 @@ void sessionkill(PPPSession *pppSession)
 {
 	LOG(3, pppSession->pppoeSession, "LCP: Kill Session\n");
 	change_state(pppSession, lcp, Closed);
-	pppoe_sessionkill(pppSession->pppoeSession);
+	pppoeSessionKill((void *) pppSession->pppoeSession); // Override const
 	memset(pppSession, 0, sizeof(pppSession));
 }
 

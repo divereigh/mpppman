@@ -31,28 +31,31 @@ typedef struct InterfaceStruct {
 	int sessionSock;		/* Socket for session frames */
 	int clientOK;			/* Client requests allowed (PADI, PADR) */
 	int acOK;			/* AC replies allowed (PADO, PADS) */
-	int lastPacketType;		/* Last packet type sent (PADI, PADO, PADR, PADS) */
 	struct event *discoveryEvent;	/* Event for packet to be read */
 	struct event *sessionEvent;	/* Event for packet to be read */
 	discovery_cb_func discovery_cb;	/* Function called on successful/teardown discovery */
-	unsigned char mac[ETH_ALEN];	/* MAC address */
+	uint8_t mac[ETH_ALEN];		/* Local MAC address */
 	char server_ac_name[64];	/* Server AC name */
 	char server_service_name[64];	/* Service name to match against client */
 	char client_ac_name[64];	/* AC name to match against server */
 	char client_service_name[64];	/* Service name to send to server */
-	struct event *timerEvent;	/* Timer event */
 } PPPoEInterface;
 
 struct PPPoESessionStruct {
 	unsigned int epoch;			/* Epoch when last activity was seen */
-	uint16_t sid;				/* Session number */
-	const PPPoEInterface *iface;			/* Interface */
-	unsigned char peerMac[ETH_ALEN];	/* Peer's MAC address */
+	uint16_t sid;				/* Session number (zero if not fully open) */
+	const PPPoEInterface *iface;		/* Interface */
+	uint8_t peerMac[ETH_ALEN];		/* Peer's MAC address */
 	PPPSession *pppSession;			/* Matching PPP Session */
+	int lastPacketType;			/* Last packet type sent (PADI, PADO, PADR, PADS) */
+	uint8_t hostUniq[ETH_ALEN];		/* Host Uniq for this */
+	size_t hostUniqLen;			/* Length of above */
 	int server;				/* True if this we are a server */
 	int closing;				/* Is this session closing */
 	char ac_name[64];			/* Server AC name */
 	char service_name[64];			/* Service name */
+	char avc_id[64];			/* NBN Circuit ID */
+	struct event *timerEvent;		/* Timer event */
 };
 
 PPPoEInterface * openPPPoEInterface(char const *ifname, discovery_cb_func cb);
@@ -63,5 +66,6 @@ uint8_t *pppoe_session_header(uint8_t *b, const PPPoESession *pppoeSession);
 void pppoe_incr_header_length(uint8_t *b, int n);
 void discoveryServer(PPPoEInterface *iface, char *ac_name, char *service_name);
 void discoveryClient(PPPoEInterface *iface, char *ac_name, char *service_name, int attempts);
-void pppoe_sessionkill(const PPPoESession *pppoeSession);
+void pppoeSessionKill(PPPoESession *pppoeSession);
+int discoveryClientCount();
 #endif

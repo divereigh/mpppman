@@ -199,3 +199,17 @@ char *fmtMacAddr(const uint8_t *pMacAddr)
   return strMAC;
 }
 
+#define MAX_BINARY 80
+
+char *fmtBinary(const uint8_t *pData, const size_t len)
+{
+	static char strData[MAX_BINARY*2+1];
+	int n;
+
+	for (n=0; n<len && n<MAX_BINARY; n++) {
+		sprintf(strData+n*2, "%02x", pData[n]);
+	}
+
+  	return strData;
+}
+

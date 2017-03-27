@@ -8,6 +8,10 @@
 #include <string.h>
 #endif
 
+#ifdef HAVE_STDLIB_H
+#include <stdlib.h>
+#endif
+
 #include "event.h"
 #include "lcp.h"
 #include "log.h"
@@ -15,6 +19,8 @@
 #include "common.h"
 #include "auth.h"
 #include "ip.h"
+
+static uint32_t mp_epdis_magic=0;
 
 void dumplcp(const PPPoESession *pppoe, uint8_t *p, int l)
 {
@@ -109,7 +115,7 @@ void dumplcp(const PPPoESession *pppoe, uint8_t *p, int l)
 						struct in_addr *ipaddr = (struct in_addr *)(o + 3);
 						LOG(4, pppoe, "    %s ipaddr: %s\n", ppp_lcp_option(type), inet_ntoa(*ipaddr));
 					} else if (ep_type==PPPMAGIC) {
-						LOG(4, pppoe, "    %s pppmagic: %s\n", ppp_lcp_option(type), fmtBinary(o + 3, o[1]));
+						LOG(4, pppoe, "    %s pppmagic: %s\n", ppp_lcp_option(type), fmtBinary(o + 3, o[1]-3));
 					} else {
 						LOG(4, pppoe, "    %s unknown: %d\n", ppp_lcp_option(type), ep_type);
 					}
@@ -294,6 +300,26 @@ void lcp_restart(PPPSession *pppSession)
 	change_state(pppSession, ipcp, Initial);
 	change_state(pppSession, ipv6cp, Initial);
 	change_state(pppSession, ccp, Initial);
+
+	set_lcp_options(pppSession);
+
+}
+
+void set_lcp_options(PPPSession *pppSession)
+{
+	// Reset the options for negotiation
+	if ((pppSession->flags & SESSION_CLIENT)) {
+		// Set multilink options before sending initial LCP packet
+		pppSession->mp_mrru = 1614;
+		// pppSession->mp_epdis = ntohl(config->iftun_address ? config->iftun_address : my_address);
+		if (mp_epdis_magic==0) {
+			mp_epdis_magic=random() & 0xffff;
+			mp_epdis_magic <<= 16;
+			mp_epdis_magic +=random() & 0xffff;
+			// LOG(3, NULL, "mp_epdis_magic=%s\n", fmtBinary(&mp_epdis_magic, sizeof(mp_epdis_magic)));
+		}
+		pppSession->mp_epdis = mp_epdis_magic;
+	}
 }
 
 // Process LCP messages

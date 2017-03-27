@@ -26,15 +26,15 @@ typedef struct PPPSessionStruct PPPSession;
 
 typedef void (*ppp_cb_func)(PPPSession *, int);
 
-// This should be a time_t I reckon - DAI
-typedef uint32_t clockt;
-
 extern int ppp_restart_time;
 extern int ppp_max_failure;
 extern int ppp_max_configure;
 extern int radius_authtypes;
 extern int radius_authprefer;
 extern int MRU;
+
+// This should be a time_t I reckon - DAI
+typedef uint32_t clockt;
 
 // session flags
 #define SESSION_PFC     (1 << 0)        // use Protocol-Field-Compression
@@ -49,8 +49,15 @@ extern int MRU;
 #define PPPCBACT_IPCPOK   3
 #define PPPCBACT_SHUTDOWN 4
 
+typedef struct {
+	uint8_t length;                 // Endpoint Discriminator length
+	uint8_t addr_class;             // Endpoint Discriminator class
+	uint8_t address[MAXADDRESS];    // Endpoint Discriminator address
+} epdist;
+
 #include "pppoe.h"
 #include "event.h"
+#include "bundle.h"
 
 // PPP phases
 enum {
@@ -100,12 +107,6 @@ enum {
 	IdentRequest
 };
 
-typedef struct {
-	uint8_t length;                 // Endpoint Discriminator length
-	uint8_t addr_class;             // Endpoint Discriminator class
-	uint8_t address[MAXADDRESS];    // Endpoint Discriminator address
-} epdist;
-
 typedef struct PPPSessionStruct {
 	const PPPoESession *pppoeSession; // Match PPPoESession
 	struct PPPSessionStruct *link;	// Linked session
@@ -139,7 +140,7 @@ typedef struct PPPSessionStruct {
 	// Remote settings
 	uint32_t mrru;                  // Multilink Max-Receive-Reconstructed-Unit
 	epdist epdis;                   // Multilink Endpoint Discriminator
-//	bundleidt bundle;               // Multilink Bundle Identifier
+	PPPBundle *bundle;              // Multilink Bundle Identifier
 	uint8_t mssf;                   // Multilink Short Sequence Number Header Format
 
 	// PPP restart timer/counters

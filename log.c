@@ -114,7 +114,7 @@ void _log(int level, const PPPoESession *pppoe, const char *format, ...)
 	vsnprintf(message, sizeof(message), format, ap);
 
 	if (log_stream)
-		fprintf(log_stream, "%s [%04x] %s", time_now_string, pppoe ? pppoe->sid : 0, message);
+		fprintf(log_stream, "%s [%04x-%-3s] %s", time_now_string, pppoe ? pppoe->sid : 0, pppoe ? pppoe->label : "", message);
 /*
 	else if (syslog_log)
 		syslog(level + 2, "%s", message); // We don't need LOG_EMERG or LOG_ALERT

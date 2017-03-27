@@ -44,6 +44,7 @@ typedef struct InterfaceStruct {
 struct PPPoESessionStruct {
 	unsigned int epoch;			/* Epoch when last activity was seen */
 	uint16_t sid;				/* Session number (zero if not fully open) */
+	char label[10];				/* Label for the logs */
 	const PPPoEInterface *iface;		/* Interface */
 	uint8_t peerMac[ETH_ALEN];		/* Peer's MAC address */
 	PPPSession *pppSession;			/* Matching PPP Session */

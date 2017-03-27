@@ -220,6 +220,7 @@ void discovery_cb(PPPoESession *pppoeSession, int action)
 		if (pppoeSession->server) {
 			LOG(3, pppoeSession, "discover server session started %s/%s\n", pppoeSession->ac_name, pppoeSession->service_name);
 			downstream=pppoeSession;
+			strcpy(pppoeSession->label, "dn ");
 			pppServer(pppoeSession, ppp_cb);
 
 			// Trigger 1
@@ -227,8 +228,10 @@ void discovery_cb(PPPoESession *pppoeSession, int action)
 		} else {
 			LOG(3, pppoeSession, "discover client session started %s/%s\n", pppoeSession->ac_name, pppoeSession->service_name);
 			if (upstream1==NULL) {
+				strcpy(pppoeSession->label, "up1");
 				upstream1=pppoeSession;
 			} else {
+				strcpy(pppoeSession->label, "up2");
 				upstream2=pppoeSession;
 			}
 			pppClient(pppoeSession, ppp_cb);

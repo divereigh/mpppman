@@ -219,6 +219,7 @@ int pppoeIsSessionUnique(char *avc_id)
 {
 	int i;
 
+	return(1);
 	for (i=0; i<MAX_PPPOE_SESSION; i++) {
 		// LOG(0, NULL, "Checking %d: sid=%d, hostUniqLen=%d\n", i, pppoe_sessions[i].sid, (long) pppoe_sessions[i].hostUniqLen);
 		if ((pppoe_sessions[i].sid!=0 || pppoe_sessions[i].hostUniqLen!=0) && strcmp(avc_id, pppoe_sessions[i].avc_id)==0) {
@@ -793,6 +794,7 @@ static void pppoe_recv_PADO(const PPPoEInterface *iface, uint8_t *pack, int size
 
 	if (!pppoeIsSessionUnique(avc_id)) {
 		LOG(3, NULL, "pppoe: Ignoring response from existing link\n");
+		return;
 	}
 	strcpy(pppoeSession->avc_id, avc_id);
 

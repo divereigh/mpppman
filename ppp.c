@@ -25,6 +25,7 @@
 #include "auth.h"
 #include "ip.h"
 #include "ipv6.h"
+#include "bundle.h"
 
 PPPSession ppp_sessions[MAX_PPP_SESSION];
 int ppp_restart_time=5;
@@ -33,7 +34,6 @@ int ppp_max_configure=10;
 int radius_authtypes=AUTHPAP;
 int radius_authprefer=AUTHPAP;
 int MRU=1462;
-static uint32_t mp_epdis_magic=0;
 
 
 /* Find a session that has the given session id, 0 will find a free session
@@ -110,7 +110,7 @@ PPPSession * ppp_new_session(const PPPoESession *pppoeSession, uint8_t flags)
 	
 	pppSession->pppoeSession=pppoeSession;
 
-	// session[sid].opened = time_now;
+	pppSession->opened = time_now;
 	// session[sid].last_packet = session[sid].last_data = time_now;
 
 	//strncpy(session[sid].called, called, sizeof(session[sid].called) - 1);
@@ -128,15 +128,7 @@ PPPSession * ppp_new_session(const PPPoESession *pppoeSession, uint8_t flags)
 	// TODO - Need to calculate this properly
 	pppSession->ppp_mru = PPPoE_MRU; // Should be MRU;
 
-	if ((pppSession->flags & SESSION_CLIENT)) {
-		// Set multilink options before sending initial LCP packet
-		pppSession->mp_mrru = 1614;
-		// pppSession->mp_epdis = ntohl(config->iftun_address ? config->iftun_address : my_address);
-		if (mp_epdis_magic==0) {
-			mp_epdis_magic=(random() & 0xffff) << 16 + (random() & 0xffff);
-		}
-		pppSession->mp_epdis = mp_epdis_magic;
-	}
+	set_lcp_options(pppSession);
 
 	// sendlcp(pppSession);
 	// change_state(pppSession, lcp, RequestSent);
@@ -693,29 +685,24 @@ int sessionsetup(PPPSession *pppSession)
 
 int sessionsetup_client(PPPSession *pppSession)
 {
-#if 0
 	// A session now exists, set it up
 	int r;
 
-	LOG(3, s, t, "Doing client session setup for session\n");
+	LOG(3, pppSession->pppoeSession, "Doing client session setup for session\n");
 
 	// Join a bundle if the MRRU option is accepted
-	if(session[s].mrru > 0 && session[s].bundle == 0)
+	if(pppSession->mrru > 0 && pppSession->bundle == NULL)
 	{
-		LOG(3, s, t, "This session can be part of multilink bundle\n");
-		if (join_bundle(s) > 0)
-			cluster_send_bundle(session[s].bundle);
-		else
+		LOG(3, pppSession->pppoeSession, "This session can be part of multilink bundle\n");
+		if (join_bundle(pppSession) == NULL)
 		{
-			LOG(0, s, t, "MPPP: Unable to join bundle\n");
-			sessionshutdown(s, "Unable to join bundle", CDN_NONE, TERM_SERVICE_UNAVAILABLE);
+			LOG(0, pppSession->pppoeSession, "MPPP: Unable to join bundle\n");
+			sessionshutdown(pppSession, 1, "Unable to join bundle");
 			return 0;
 		}
 	}
 
-	// Make sure this is right
-	session[s].tunnel = t;
-
+#if 0
 	// no need to set a route for the same IP address of the bundle
 	if (!session[s].bundle || (bundle[session[s].bundle].num_of_links == 1))
 	{

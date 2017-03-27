@@ -328,6 +328,7 @@ void processPPP(PPPSession *pppSession, uint8_t *pack, int size)
 // Probably should live in lcp.c
 void sessionshutdown(PPPSession *pppSession, int initiate, char const *reason)
 {
+	PPPBundle *b=pppSession->bundle;
 #if 0
 	int walled_garden = session[s].walled_garden;
 	bundleidt b = session[s].bundle;
@@ -486,6 +487,43 @@ void sessionshutdown(PPPSession *pppSession, int initiate, char const *reason)
 	}
 
 #endif
+
+	if (b)
+	{
+		uint8_t mem_num = 0;
+		uint8_t ml;
+		// Find out which member number we are
+		for(ml = 0; ml<b->num_of_links; ml++)
+		{
+			if(b->members[ml] == pppSession)
+			{
+				mem_num = ml;
+				break;
+			}
+		}
+
+		// Only do this if we are actually in the bundle
+		if (ml < b->num_of_links) {
+			// This session was part of a bundle
+			b->num_of_links--;
+			LOG(3, pppSession->pppoeSession, "MPPP: Dropping member link: %d from bundle %d (remaining links: %d)\n",pppSession->id, b->id, b->num_of_links);
+			if(b->num_of_links == 0)
+			{
+				clear_bundle(b);
+				LOG(3, pppSession->pppoeSession, "MPPP: Kill bundle: %d (No remaining member links)\n",b->id);
+			}
+			else 
+			{
+				// Adjust the members array to accomodate the new change
+				// It should be here num_of_links instead of num_of_links-1 (previous instruction "num_of_links--")
+				if(b->members[b->num_of_links] != pppSession)
+				{
+					b->members[mem_num] = b->members[b->num_of_links];
+					LOG(3, pppSession->pppoeSession, "MPPP: Adjusted member links array\n");
+				}
+			}
+		}
+	}
 
 	if (initiate) {
 		sendLCPTerminateReq(pppSession, reason);

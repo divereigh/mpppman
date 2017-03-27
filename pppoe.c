@@ -220,7 +220,7 @@ int pppoeIsSessionUnique(char *avc_id)
 {
 	int i;
 
-	return(1);
+	// return(1);
 	for (i=0; i<MAX_PPPOE_SESSION; i++) {
 		// LOG(0, NULL, "Checking %d: sid=%d, hostUniqLen=%d\n", i, pppoe_sessions[i].sid, (long) pppoe_sessions[i].hostUniqLen);
 		if ((pppoe_sessions[i].sid!=0 || pppoe_sessions[i].hostUniqLen!=0) && strcmp(avc_id, pppoe_sessions[i].avc_id)==0) {

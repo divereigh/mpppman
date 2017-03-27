@@ -152,6 +152,13 @@ PPPBundle *join_bundle(PPPSession *pppSession)
 	return b;
 }
 
+void clear_bundle(PPPBundle *b)
+{
+	if (!b) return;
+	memset(b, 0, sizeof(*b));
+	b->state = BUNDLEFREE;
+}
+
 void processmpframe(PPPSession *pppSession, uint8_t *p, uint16_t l, uint8_t extra)
 {
 	uint16_t proto;

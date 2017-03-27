@@ -65,4 +65,5 @@ typedef struct PPPBundleStruct {
 
 PPPBundle *join_bundle(PPPSession *pppSession);
 void processmp(PPPSession *pppSession, uint8_t *p, uint16_t l);
+void clear_bundle(PPPBundle *b);
 #endif

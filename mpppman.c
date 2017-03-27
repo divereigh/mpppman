@@ -182,27 +182,14 @@ void ppp_cb(PPPSession *pppSession, int action)
 				// Wait for next auth request from downstream
 			}
 		} else if (action==PPPCBACT_IPCPOK) {
-#if 0
 			if (downstream && downstream->pppSession) {
-				LOG(3, pppSession->pppoeSession, "trigger downstream IPCP\n");
-				if (downstream->pppSession->ip_local != upstream2->pppSession->ip_remote
-					|| downstream->pppSession->ip_remote != upstream2->pppSession->ip_local) {
-					// Different (or new) IP addresses from upstream2
-					downstream->pppSession->ip_local=upstream2->pppSession->ip_remote;
-					downstream->pppSession->ip_remote=upstream2->pppSession->ip_local;
-					sendipcp(downstream->pppSession);
-					/* Start another session */
-					LOG(3, pppSession->pppoeSession, "Client count: %d\n", discoveryClientCount());
-					if (discoveryClientCount()<2) {
-						discoveryClient((PPPoEInterface *) pppSession->pppoeSession->iface, NULL, NULL, 10); // Lose the const
-					}
-				} else {
+				if (downstream->pppSession->ip_local == upstream2->pppSession->ip_remote
+					|| downstream->pppSession->ip_remote == upstream2->pppSession->ip_local) {
 					// Just link the sessions back together
 					LOG(3, pppSession->pppoeSession, "Link sessions\n");
 					upstream2->pppSession->link=downstream->pppSession;
 				}
 			}
-#endif
 		} else if (action==PPPCBACT_SHUTDOWN) {
 			upstream2->closing=1;
 			if (downstream && downstream->pppSession && downstream->closing==0) {

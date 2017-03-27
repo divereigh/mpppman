@@ -45,6 +45,7 @@ PPPSession *ppp_find_free_session()
 
 	for (i=0; i<MAX_PPP_SESSION; i++) {
 		if (ppp_sessions[i].pppoeSession==NULL) {
+			ppp_sessions[i].id=i;
 			return(&ppp_sessions[i]);
 		}
 	}
@@ -152,7 +153,7 @@ PPPSession * ppp_new_session(const PPPoESession *pppoeSession, uint8_t flags)
 // fill in a PPPOE message with a PPP frame,
 // returns start of PPP frame
 uint8_t *pppoe_makeppp(uint8_t *b, int size, uint8_t *p, int l, const PPPSession *pppSession,
-						uint16_t mtype, uint8_t prio, int bid, uint8_t mp_bits)
+						uint16_t mtype, uint8_t prio, PPPBundle *bundle, uint8_t mp_bits)
 {
 	uint16_t type = mtype;
 	uint8_t *start = b;
@@ -169,42 +170,39 @@ uint8_t *pppoe_makeppp(uint8_t *b, int size, uint8_t *p, int l, const PPPSession
 	b= pppoe_session_header(b, pppSession->pppoeSession);
 
 	// Check whether this session is part of multilink
-#if 0
-	if (bid)
+	if (bundle)
 	{
-		if (bundle[bid].num_of_links > 1)
-			type = PPPMP; // Change PPP message type to the PPPMP
+		if (bundle->num_of_links > 1)
+			type = PPP_MP; // Change PPP message type to the PPP_MP
 		else
-			bid = 0;
+			bundle = NULL;
 	}
-#endif
 
 	*(uint16_t *) b = htons(type);
 	b += 2;
 	pppoe_incr_header_length(pppoe_hdr, 2);
 
-#if 0
-	if (bid)
+	if (bundle)
 	{
 		// Set the sequence number and (B)egin (E)nd flags
-		if (session[s].mssf)
+		if (pppSession->mssf)
 		{
 			// Set the multilink bits
 			uint16_t bits_send = mp_bits;
-			*(uint16_t *) b = htons((bundle[bid].seq_num_t & 0x0FFF)|bits_send);
+			*(uint16_t *) b = htons((bundle->seq_num_t & 0x0FFF)|bits_send);
 			b += 2;
 			pppoe_incr_header_length(pppoe_hdr, 2);
 		}
 		else
 		{
-			*(uint32_t *) b = htonl(bundle[bid].seq_num_t);
+			*(uint32_t *) b = htonl(bundle->seq_num_t);
 			// Set the multilink bits
 			*b = mp_bits;
 			b += 4;
 			pppoe_incr_header_length(pppoe_hdr, 4);
 		}
 
-		bundle[bid].seq_num_t++;
+		bundle->seq_num_t++;
 
 		// Add the message type if this fragment has the begin bit set
 		if (mp_bits & MP_BEGIN)
@@ -215,7 +213,6 @@ uint8_t *pppoe_makeppp(uint8_t *b, int size, uint8_t *p, int l, const PPPSession
 			pppoe_incr_header_length(pppoe_hdr, 2);
 		}
 	}
-#endif
 
 	if ((b - start) + l > size)
 	{

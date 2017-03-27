@@ -71,10 +71,11 @@ static PPPBundle *new_bundle()
 		if (bundle[i].state == BUNDLEFREE)
 		{
 			LOG(4, NULL, "MPPP: Assigning bundle ID %d\n", i);
+			bundle[i].id=i;
 			bundle[i].num_of_links = 1;
 			bundle[i].last_check = time_now;        // Initialize last_check value
 			bundle[i].state = BUNDLEOPEN;
-			bundle[i].current_ses = NULL;     // This is to enforce the first session 0 to be used at first
+			bundle[i].current_ses = -1;     // This is to enforce the first session 0 to be used at first
 			memset(&frag[i], 0, sizeof(fragmentationt));
 			bundle[i].frag=&frag[i];
 			return &bundle[i];

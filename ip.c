@@ -16,6 +16,7 @@
 #include "ip.h"
 #include "ppp.h"
 
+#define MIN_IP_SIZE	0x19
 uint32_t last_id = 0;
 
 // send an IPCP Config Request challenge
@@ -49,26 +50,6 @@ void sendipcp(PPPSession *pppSession)
 
 	pppoe_sess_send(pppSession->pppoeSession, buf, 10 + (q - buf)); // send it
 	restart_timer(pppSession, ipcp);
-}
-
-/* Process IP packet - pack points the PPP payload */
-void processip_in(PPPSession *pppSession, uint8_t *pack, int size)
-{
-	uint8_t buf[MAXETHER];
-	uint8_t *q;
-	LOG(3, pppSession->pppoeSession, "Recv IP Packet\n");
-
-	if (pppSession->ppp.phase != Network || pppSession->ppp.ipcp != Opened)
-                return;
-	if (pppSession->link) {
-		if (pppSession->link->ppp.phase != Network || pppSession->link->ppp.ipcp != Opened)
-			return;
-
-		if (pppSession->link->pppoeSession) {
-        		q = pppoe_makeppp(buf, sizeof(buf), pack, size, pppSession->link, PPP_IP, 0, 0, 0);
-			pppoe_sess_send(pppSession->link->pppoeSession, buf, size + (q - buf)); // send it
-		}
-	}
 }
 
 static void ipcp_open(PPPSession *pppSession)
@@ -458,4 +439,235 @@ void processipcp(PPPSession *pppSession, uint8_t *p, uint16_t l)
 	}
 }
 
+// process outgoing IP
+//
+// (i.e. this routine writes to data[-8]).
+void processip_out(PPPSession *pppSession, uint8_t *buf, int len)
+{
+	uint8_t etherbuf[MAXETHER];
+	uint8_t *q;
+	uint8_t *data = buf;	// Keep a copy of the originals.
+	int size = len;
+
+	uint8_t fragbuf[MAXETHER + 20];
+
+	if (len < MIN_IP_SIZE)
+	{
+		LOG(1, pppSession->pppoeSession, "Short IP, %d bytes\n", len);
+		return;
+	}
+	if (len >= MAXETHER)
+	{
+		LOG(1, pppSession->pppoeSession, "Oversize IP packet %d bytes\n", len);
+		return;
+	}
+
+	if (len > pppSession->mru || (pppSession->mrru && len > pppSession->mrru))
+	{
+		LOG(3, pppSession->pppoeSession, "Packet size more than session MRU\n");
+		return;
+	}
+
+#if 0
+	// DoS prevention: enforce a maximum number of packets per 0.1s for a session
+	if (config->max_packets > 0)
+	{
+		if (sess_local[s].last_packet_out == TIME)
+		{
+			int max = config->max_packets;
+
+			// All packets for throttled sessions are handled by the
+			// master, so further limit by using the throttle rate.
+			// A bit of a kludge, since throttle rate is in kbps,
+			// but should still be generous given our average DSL
+			// packet size is 200 bytes: a limit of 28kbps equates
+			// to around 180 packets per second.
+			if (!config->cluster_iam_master && sp->throttle_out && sp->throttle_out < max)
+				max = sp->throttle_out;
+
+			if (++sess_local[s].packets_out > max)
+			{
+				sess_local[s].packets_dropped++;
+				return;
+			}
+		}
+		else
+		{
+			if (sess_local[s].packets_dropped)
+			{
+				INC_STAT(tun_rx_dropped, sess_local[s].packets_dropped);
+				LOG(3, s, t, "Dropped %u/%u packets to %s for %suser %s\n",
+					sess_local[s].packets_dropped, sess_local[s].packets_out,
+					fmtaddr(ip, 0), sp->throttle_out ? "throttled " : "",
+					sp->user);
+			}
+
+			sess_local[s].last_packet_out = TIME;
+			sess_local[s].packets_out = 1;
+			sess_local[s].packets_dropped = 0;
+		}
+	}
+
+	// adjust MSS on SYN and SYN,ACK packets with options
+	if ((ntohs(*(uint16_t *) (buf + 6)) & 0x1fff) == 0 && buf[9] == IPPROTO_TCP) // first tcp fragment
+	{
+		int ihl = (buf[0] & 0xf) * 4; // length of IP header
+		if (len >= ihl + 20 && (buf[ihl + 13] & TCP_FLAG_SYN) && ((buf[ihl + 12] >> 4) > 5))
+			adjust_tcp_mss(s, t, buf, len, buf + ihl);
+	}
+
+	if (sp->tbf_out)
+	{
+		if (!config->no_throttle_local_IP || !sessionbyip(ip_src))
+		{
+			// Are we throttling this session?
+			if (config->cluster_iam_master)
+				tbf_queue_packet(sp->tbf_out, data, size);
+			else
+				master_throttle_packet(sp->tbf_out, data, size);
+			return;
+		}
+	}
+
+	if (sp->walled_garden && !config->cluster_iam_master)
+	{
+		// We are walled-gardening this
+		master_garden_packet(s, data, size);
+		return;
+	}
+
+#endif
+	if(pppSession->bundle != NULL && pppSession->bundle->num_of_links > 1)
+	{
+		PPPSession *members[MAXBUNDLESES];
+		PPPBundle *b = pppSession->bundle;
+		uint32_t num_of_links, nb_opened;
+		int i;
+
+		num_of_links = b->num_of_links;
+		nb_opened = 0;
+		for (i = 0;i < num_of_links;i++)
+		{
+			PPPSession *pS = b->members[i];
+			if (pS->ppp.lcp == Opened)
+			{
+				members[nb_opened] = pS;
+				nb_opened++;
+			}
+		}
+
+		if (nb_opened < 1)
+		{
+			LOG(3, pppSession->pppoeSession, "MPPP: PROCESSIPOUT ERROR, no session opened in bundle:%d\n", b->id);
+			return;
+		}
+
+		num_of_links = nb_opened;
+		b->current_ses = (b->current_ses + 1) % num_of_links;
+		pppSession = members[b->current_ses];
+		// sp = &session[s];
+		LOG(4, pppSession->pppoeSession, "MPPP: (BEGIN) Session number becomes: %d\n", pppSession->id);
+
+		if (num_of_links > 1)
+		{
+			if(len > MINFRAGLEN)
+			{
+				//for rotate traffic among the member links
+				uint32_t divisor = num_of_links;
+				if (divisor > 2)
+					divisor = divisor/2 + (divisor & 1);
+
+				// Partition the packet to "num_of_links" fragments
+				uint32_t fraglen = len / divisor;
+				uint32_t last_fraglen = fraglen + len % divisor;
+				uint32_t remain = len;
+
+				// send the first packet
+				uint8_t *p = pppoe_makeppp(fragbuf, sizeof(fragbuf), buf, fraglen, pppSession, PPP_IP, 0, b, MP_BEGIN);
+				if (!p) return;
+				pppoe_sess_send(pppSession->pppoeSession, fragbuf, fraglen + (p-fragbuf)); // send it...
+
+				// statistics
+				// update_session_out_stat(s, sp, fraglen);
+
+				remain -= fraglen;
+				while (remain > last_fraglen)
+				{
+					b->current_ses = (b->current_ses + 1) % num_of_links;
+					pppSession = members[b->current_ses];
+					// sp = &session[s];
+					LOG(4, pppSession->pppoeSession, "MPPP: (MIDDLE) Session number becomes: %d\n", pppSession->id);
+					p = pppoe_makeppp(fragbuf, sizeof(fragbuf), buf+(len - remain), fraglen, pppSession, PPP_IP, 0, b, 0);
+					if (!p) return;
+					pppoe_sess_send(pppSession->pppoeSession, fragbuf, fraglen + (p-fragbuf)); // send it...
+					// update_session_out_stat(s, sp, fraglen);
+					remain -= fraglen;
+				}
+				// send the last fragment
+				b->current_ses = (b->current_ses + 1) % num_of_links;
+				pppSession = members[b->current_ses];
+				// sp = &session[s];
+				LOG(4, pppSession->pppoeSession, "MPPP: (END) Session number becomes: %d\n", pppSession->id);
+				p = pppoe_makeppp(fragbuf, sizeof(fragbuf), buf+(len - remain), remain, pppSession, PPP_IP, 0, b, MP_END);
+				if (!p) return;
+				pppoe_sess_send(pppSession->pppoeSession, fragbuf, remain + (p-fragbuf)); // send it...
+				// update_session_out_stat(s, sp, remain);
+				if (remain != last_fraglen)
+					LOG(3, pppSession->pppoeSession, "PROCESSIPOUT ERROR REMAIN != LAST_FRAGLEN, %d != %d\n", remain, last_fraglen);
+			}
+			else
+			{
+				// Send it as one frame
+				uint8_t *p = pppoe_makeppp(fragbuf, sizeof(fragbuf), buf, len, pppSession, PPP_IP, 0, b, MP_BOTH_BITS);
+				if (!p) return;
+				pppoe_sess_send(pppSession->pppoeSession, fragbuf, len + (p-fragbuf)); // send it...
+				LOG(4, pppSession->pppoeSession, "MPPP: packet sent as one frame\n");
+				// update_session_out_stat(s, sp, len);
+			}
+		}
+		else
+		{
+			// Send it as one frame (NO MPPP Frame)
+			// uint8_t *p = opt_makeppp(buf, len, s, t, PPP_IP, 0, 0, 0);
+			// tunnelsend(p, len + (buf-p), t); // send it...
+			// update_session_out_stat(s, sp, len);
+
+			/* Make a new packet for the moment */
+        		q = pppoe_makeppp(etherbuf, sizeof(etherbuf), buf, len, pppSession, PPP_IP, 0, 0, 0);
+			pppoe_sess_send(pppSession->pppoeSession, etherbuf, len + (q - etherbuf)); // send it
+		}
+	}
+	else
+	{
+		// uint8_t *p = opt_makeppp(buf, len, s, t, PPP_IP, 0, 0, 0);
+		// tunnelsend(p, len + (buf-p), t); // send it...
+		// update_session_out_stat(s, sp, len);
+		/* Make a new packet for the moment */
+        	q = pppoe_makeppp(etherbuf, sizeof(etherbuf), buf, len, pppSession, PPP_IP, 0, 0, 0);
+		pppoe_sess_send(pppSession->pppoeSession, etherbuf, len + (q - etherbuf)); // send it
+	}
+}
+
+/* Process IP packet - pack points the PPP payload */
+void processip_in(PPPSession *pppSession, uint8_t *pack, int size)
+{
+	uint8_t buf[MAXETHER];
+	uint8_t *q;
+	LOG(3, pppSession->pppoeSession, "Recv IP Packet\n");
+
+	if (pppSession->ppp.phase != Network || pppSession->ppp.ipcp != Opened)
+                return;
+	if (pppSession->link) {
+		if (pppSession->link->ppp.phase != Network || pppSession->link->ppp.ipcp != Opened)
+			return;
+
+		processip_out(pppSession->link, pack, size);
+#if 0
+		if (pppSession->link->pppoeSession) {
+        		q = pppoe_makeppp(buf, sizeof(buf), pack, size, pppSession->link, PPP_IP, 0, 0, 0);
+			pppoe_sess_send(pppSession->link->pppoeSession, buf, size + (q - buf)); // send it
+		}
+#endif
+	}
+}
 

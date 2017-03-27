@@ -188,6 +188,7 @@ static PPPoESession *pppoeFindSessionFree()
 	for (i=0; i<MAX_PPPOE_SESSION; i++) {
 		// LOG(0, NULL, "Checking %d: sid=%d, hostUniqLen=%d\n", i, pppoe_sessions[i].sid, (long) pppoe_sessions[i].hostUniqLen);
 		if (pppoe_sessions[i].sid==0 && pppoe_sessions[i].hostUniqLen==0) {
+			pppoe_sessions[i].id=i;
 			return(&pppoe_sessions[i]);
 		}
 	}

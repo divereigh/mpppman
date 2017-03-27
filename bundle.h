@@ -46,6 +46,7 @@ typedef struct
 fragmentationt;
 
 typedef struct PPPBundleStruct {
+	int id;					// ID number
         int state;                              // current state (bundlestate enum)
         uint32_t seq_num_t;                     // Sequence Number (transmission)
         uint32_t timeout;                       // Session-Timeout for bundle
@@ -57,7 +58,7 @@ typedef struct PPPBundleStruct {
         uint8_t mssf;                           // Multilink Short Sequence Number Header Format
         epdist epdis;                           // Multilink Endpoint Discriminator
         char user[MAXUSER];                     // Needed for matching member links
-        PPPSession *current_ses;                 // Current session to use for sending (used in RR load-balancing)
+        uint32_t current_ses;                       // Current session to use for sending (used in RR load-balancing)
         PPPSession *members[MAXBUNDLESES];       // Array for member links sessions
 	fragmentationt *frag;			// Link to fragmentation stuff
 } PPPBundle;

@@ -108,6 +108,7 @@ enum {
 };
 
 typedef struct PPPSessionStruct {
+	int id;				// ID number
 	const PPPoESession *pppoeSession; // Match PPPoESession
 	struct PPPSessionStruct *link;	// Linked session
 	struct {
@@ -245,7 +246,7 @@ typedef struct PPPSessionStruct {
 
 PPPSession * ppp_new_session(const PPPoESession *pppoeSession, uint8_t flags);
 uint8_t *pppoe_makeppp(uint8_t *b, int size, uint8_t *p, int l, const PPPSession *pppSession,
-		uint16_t mtype, uint8_t prio, int bid, uint8_t mp_bits);
+		uint16_t mtype, uint8_t prio, PPPBundle *bundle, uint8_t mp_bits);
 void sendlcp(PPPSession *pppSession);
 void processPPP(PPPSession *pppSession, uint8_t *pack, int size);
 void sessionshutdown(PPPSession *pppSession, int initiate, char const *reason);

@@ -26,6 +26,7 @@ typedef uint8_t hasht[16];
 typedef struct PPPSessionStruct PPPSession;
 
 typedef struct InterfaceStruct {
+	int id;				/* ID number */
 	char name[IFNAMSIZ+1];		/* Interface name */
 	int discoverySock;		/* Socket for discovery frames */
 	int sessionSock;		/* Socket for session frames */
@@ -42,6 +43,7 @@ typedef struct InterfaceStruct {
 } PPPoEInterface;
 
 struct PPPoESessionStruct {
+	int id;					/* ID number */
 	unsigned int epoch;			/* Epoch when last activity was seen */
 	uint16_t sid;				/* Session number (zero if not fully open) */
 	char label[10];				/* Label for the logs */

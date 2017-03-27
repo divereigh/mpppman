@@ -25,6 +25,7 @@
 #include "auth.h"
 #include "ip.h"
 #include "ipv6.h"
+#include "ccp.h"
 #include "bundle.h"
 
 PPPSession ppp_sessions[MAX_PPP_SESSION];
@@ -233,16 +234,6 @@ uint8_t *pppoe_makeppp(uint8_t *b, int size, uint8_t *p, int l, const PPPSession
 }
 
 
-/* Process CCP packet - pack points the PPP payload */
-void processccp(PPPSession *pppSession, uint8_t *pack, int size)
-{
-}
-
-/* Process MP packet - pack points the PPP payload */
-void processmp(PPPSession *pppSession, uint8_t *pack, int size)
-{
-}
-
 void protoreject(PPPSession *pppSession, uint8_t *pack, int size, uint16_t proto)
 {
 }
@@ -310,7 +301,7 @@ void processPPP(PPPSession *pppSession, uint8_t *pack, int size)
 	else if (proto == PPP_IP)
 	{
 		pppSession->last_packet = pppSession->last_data = time_now;
-		processip(pppSession, pack, size);
+		processip_in(pppSession, pack, size);
 	}
 	else if (proto == PPP_MP)
 	{

@@ -10,6 +10,6 @@
 
 void sendipcp(PPPSession *pppSession);
 void processipcp(PPPSession *pppSession, uint8_t *p, uint16_t l);
-void processip(PPPSession *pppSession, uint8_t *pack, int size);
+void processip_in(PPPSession *pppSession, uint8_t *pack, int size);
 
 #endif

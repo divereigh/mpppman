@@ -33,6 +33,18 @@ typedef struct {
         uint8_t data[MAXFRAGLEN];       // Fragment data
 } fragmentt;
 
+typedef struct
+{
+	fragmentt fragment[MAXFRAGNUM];
+	uint8_t reassembled_frame[MAXETHER];    // The reassembled frame
+	uint16_t re_frame_len;                  // The reassembled frame length
+	uint16_t re_frame_begin_index, re_frame_end_index;	// reassembled frame begin index, end index respectively
+	uint16_t start_index, end_index;	// start and end sequence numbers available on the fragments array respectively
+	uint32_t M;				// Minumum frame sequence number received over all bundle members
+	uint32_t start_seq;                     // Last received frame sequence number (bearing B bit)
+}
+fragmentationt;
+
 typedef struct PPPBundleStruct {
         int state;                              // current state (bundlestate enum)
         uint32_t seq_num_t;                     // Sequence Number (transmission)
@@ -47,19 +59,9 @@ typedef struct PPPBundleStruct {
         char user[MAXUSER];                     // Needed for matching member links
         PPPSession *current_ses;                 // Current session to use for sending (used in RR load-balancing)
         PPPSession *members[MAXBUNDLESES];       // Array for member links sessions
+	fragmentationt *frag;			// Link to fragmentation stuff
 } PPPBundle;
 
-typedef struct
-{
-	fragmentt fragment[MAXFRAGNUM];
-	uint8_t reassembled_frame[MAXETHER];    // The reassembled frame
-	uint16_t re_frame_len;                  // The reassembled frame length
-	uint16_t re_frame_begin_index, re_frame_end_index;	// reassembled frame begin index, end index respectively
-	uint16_t start_index, end_index;	// start and end sequence numbers available on the fragments array respectively
-	uint32_t M;				// Minumum frame sequence number received over all bundle members
-	uint32_t start_seq;                     // Last received frame sequence number (bearing B bit)
-}
-fragmentationt;
-
 PPPBundle *join_bundle(PPPSession *pppSession);
+void processmp(PPPSession *pppSession, uint8_t *p, uint16_t l);
 #endif

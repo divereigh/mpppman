@@ -52,7 +52,7 @@ void sendipcp(PPPSession *pppSession)
 }
 
 /* Process IP packet - pack points the PPP payload */
-void processip(PPPSession *pppSession, uint8_t *pack, int size)
+void processip_in(PPPSession *pppSession, uint8_t *pack, int size)
 {
 	uint8_t buf[MAXETHER];
 	uint8_t *q;

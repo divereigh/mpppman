@@ -1,5 +1,5 @@
 AC_INIT([mpppman], [1.0], [bug-report@address])
-AM_INIT_AUTOMAKE([foreign -Wall -Werror])
+AM_INIT_AUTOMAKE
 AC_PROG_CC
 dnl Checks for header files.
 AC_HEADER_STDC

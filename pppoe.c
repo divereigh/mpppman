@@ -56,6 +56,7 @@
 
 static int init_done=0;
 PPPoESession pppoe_sessions[MAX_PPPOE_SESSION];
+PPPoEInterface pppoe_interface[MAX_PPPOE_SESSION];
 
 static uint32_t hostUniq=0;	// Contains an incrementing Host Uniq
 
@@ -284,11 +285,21 @@ PPPoESession * pppoeNewSession(const PPPoEInterface *iface, const uint8_t *addr,
 PPPoEInterface *
 openPPPoEInterface(char const *ifname, discovery_cb_func cb)
 {
+	int i;
 	PPPoEInterface *pppoe;
 
-	if ((pppoe=(PPPoEInterface *) malloc(sizeof(PPPoEInterface)))==NULL) {
-		sysFatal("PPPoEInterface malloc");
+	/* Look for an existing interface */
+	for (i=0; i<MAX_PPPOE_SESSION && pppoe_interface[i].name[0]; i++) {
+		if (strcmp(ifname, pppoe_interface[i].name)==0) {
+			return(&pppoe_interface[i]);
+		}
 	}
+
+	if (i==MAX_PPPOE_SESSION) {
+		sysFatal("No more PPPoEInterface slots");
+	}
+
+	pppoe=&pppoe_interface[i];
 
 	pppoe->discoverySock = openInterface(ifname, ETH_P_PPP_DISC, pppoe->mac, NULL);
 	pppoe->sessionSock = openInterface(ifname, ETH_P_PPP_SES, NULL, NULL);

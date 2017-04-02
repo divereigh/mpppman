@@ -56,7 +56,8 @@
 #define INTERFACE_DN "vlan50"
 #define INTERFACE_UP1 "vlan50"
 #define INTERFACE_UP2 "vlan51"
-int debuglevel=3;
+#define MAX_LINK 10
+int debuglevel=0;
 time_t time_now = 0;
 uint64_t time_now_ms = 0;		// Current time in milliseconds since epoch.
 
@@ -73,12 +74,10 @@ void cb_func(evutil_socket_t fd, short what, void *arg)
 }
 
 PPPoESession *downstream=NULL;
-PPPoESession *upstream1;
-PPPoESession *upstream2;
+PPPoESession *upstream[MAX_LINK];
 
 PPPoEInterface *pppoe_dn;
-PPPoEInterface *pppoe_up1;
-PPPoEInterface *pppoe_up2;
+PPPoEInterface *pppoe_up[MAX_LINK];
 
 /* Stages of sessions are:
 Downstream
@@ -100,40 +99,35 @@ Upstream
 */
 void ppp_cb(PPPSession *pppSession, int action)
 {
+	int i;
 	LOG(3, pppSession->pppoeSession, "ppp_cb called: action=%d\n", action);
 	if (((pppSession->flags & SESSION_CLIENT)==0) && pppSession->pppoeSession == downstream) {
 		// Downstream
 		if (action==PPPCBACT_AUTHREQ) {
-			if (upstream1 && upstream1->pppSession) {
-				LOG(3, pppSession->pppoeSession, "We have downstream auth info - trigger upstream1 auth\n");
-				// strcpy(upstream1->pppSession->user, downstream->pppSession->user);
-				// strcpy(upstream1->pppSession->pass, downstream->pppSession->pass);
-				// upstream1->pppSession->flags |= SESSION_GOTAUTH;
-				// downstream->pppSession->flags |= SESSION_GOTAUTH;
-				set_auth(upstream1->pppSession);
+			for (i=0; i<MAX_LINK; i++) {
+				if (upstream[i] && upstream[i]->pppSession) {
+					LOG(3, pppSession->pppoeSession, "We have downstream auth info - trigger upstream %d auth\n", i);
+					set_auth(upstream[i]->pppSession);
+				}
 			}
 		} else if (action==PPPCBACT_IPCPOK) {
-			if (upstream1 && upstream1->pppSession) {
-				LOG(3, pppSession->pppoeSession, "Link sessions to upstream1\n");
-				upstream1->pppSession->link=downstream->pppSession;
-				downstream->pppSession->link=upstream1->pppSession;
-			} else if (upstream2 && upstream2->pppSession) {
-				LOG(3, pppSession->pppoeSession, "Link sessions to upstream2\n");
-				upstream2->pppSession->link=downstream->pppSession;
-				downstream->pppSession->link=upstream2->pppSession;
+			for (i=0; i<MAX_LINK; i++) {
+				if (upstream[i] && upstream[i]->pppSession) {
+					LOG(3, pppSession->pppoeSession, "Link sessions to upstream %d\n", i);
+					upstream[i]->pppSession->link=downstream->pppSession;
+					downstream->pppSession->link=upstream[i]->pppSession;
+					break;
+				}
 			}
 		} else if (action==PPPCBACT_SHUTDOWN) {
 			downstream->closing=1;
 			downstream->pppSession->link=NULL;
-			if (upstream1 && upstream1->pppSession) {
-				LOG(3, pppSession->pppoeSession, "Un-link sessions and shutdown upstream1\n");
-				upstream1->pppSession->link=NULL;
-				sessionshutdown(upstream1->pppSession, 1, "Local terminate request");
-			}
-			if (upstream2 && upstream2->pppSession) {
-				LOG(3, pppSession->pppoeSession, "Un-link sessions and shutdown upstream2\n");
-				upstream2->pppSession->link=NULL;
-				sessionshutdown(upstream2->pppSession, 1, "Local terminate request");
+			for (i=0; i<MAX_LINK; i++) {
+				if (upstream[i] && upstream[i]->pppSession) {
+					LOG(3, pppSession->pppoeSession, "Un-link sessions and shutdown upstream %d\n", i);
+					upstream[i]->pppSession->link=NULL;
+					sessionshutdown(upstream[i]->pppSession, 1, "Local terminate request");
+				}
 			}
 		}
 	} else if (((pppSession->flags & SESSION_CLIENT))) {
@@ -172,27 +166,26 @@ void ppp_cb(PPPSession *pppSession, int action)
 				/* Start another session */
 				LOG(3, pppSession->pppoeSession, "Client count: %d\n", discoveryClientCount());
 				if (discoveryClientCount()<2) {
-					if (upstream1==NULL) {
-						discoveryClient(pppoe_up1, NULL, NULL, 10);
-					} else {
-						discoveryClient(pppoe_up2, NULL, NULL, 10);
+					for (i=0; i<MAX_LINK && upstream[i]!=NULL; i++);
+					if (i<MAX_LINK) {
+						LOG(3, pppSession->pppoeSession, "Start client: %d\n", i);
+						discoveryClient(pppoe_up[i], NULL, NULL, 10);
 					}
 				}
 			}
 		} else if (action==PPPCBACT_SHUTDOWN) {
-			if (pppSession->pppoeSession==upstream1) {
-				upstream1=NULL;
-			} else {
-				upstream2=NULL;
+			for (i=0; i<MAX_LINK && upstream[i]!=pppSession->pppoeSession; i++);
+			if (i<MAX_LINK) {
+				upstream[i]=NULL;
 			}
+				
 			if (downstream && downstream->pppSession && downstream->closing==0) {
 				LOG(3, pppSession->pppoeSession, "Unlink and restart session\n");
 				pppSession->link=NULL;
 				if (downstream->pppSession->link==pppSession) {
-					if (upstream1 && upstream1->pppSession && upstream1->closing==0) {
-						downstream->pppSession->link=upstream1->pppSession;
-					} else if (upstream2 && upstream2->pppSession && upstream2->closing==0) {
-						downstream->pppSession->link=upstream2->pppSession;
+					for (i=0; i<MAX_LINK && upstream[i]==NULL || upstream[i]->pppSession==NULL; i++);
+					if (i<MAX_LINK) {
+						downstream->pppSession->link=upstream[i]->pppSession;
 					} else {
 						downstream->pppSession->link=NULL;
 					}
@@ -205,6 +198,8 @@ void ppp_cb(PPPSession *pppSession, int action)
 
 void discovery_cb(PPPoESession *pppoeSession, int action)
 {
+	int i;
+
 	if (action) {
 		if (pppoeSession->server) {
 			LOG(3, pppoeSession, "discover server session started %s/%s\n", pppoeSession->ac_name, pppoeSession->service_name);
@@ -215,12 +210,13 @@ void discovery_cb(PPPoESession *pppoeSession, int action)
 			discoveryClient((PPPoEInterface *) pppoeSession->iface, NULL, NULL, 10); // Lose the const
 		} else {
 			LOG(3, pppoeSession, "discover client session started %s/%s\n", pppoeSession->ac_name, pppoeSession->service_name);
-			if (upstream1==NULL) {
-				strcpy(pppoeSession->label, "up1");
-				upstream1=pppoeSession;
+			for (i=0; i<MAX_LINK && upstream[i]; i++);
+			if (i<MAX_LINK)
+			{
+				sprintf(pppoeSession->label, "up%d", i);
+				upstream[i]=pppoeSession;
 			} else {
-				strcpy(pppoeSession->label, "up2");
-				upstream2=pppoeSession;
+				sysFatal("No more space for upstream\n");
 			}
 			pppClient(pppoeSession, ppp_cb);
 		}
@@ -229,33 +225,61 @@ void discovery_cb(PPPoESession *pppoeSession, int action)
 		if (pppoeSession==downstream) {
 			downstream=NULL;
 		}
-		if (pppoeSession==upstream1) {
-			upstream1=NULL;
-		}
-		if (pppoeSession==upstream2) {
-			upstream2=NULL;
-		}
+		for (i=0; i<MAX_LINK && upstream[i]!=pppoeSession; i++);
+		upstream[i]=NULL;
 	}
 }
 
-int main() {
-	struct event *ev1, *ev2;
-	struct timeval five_seconds = {5,0};
-
+int main(int argc, char *argv[]) {
+	int i;
 	log_stream=stdout;
+	int opt_foreground=0;
+	int client_pppoe=0;
+
+	// scan args
+	while ((i = getopt(argc, argv, "fd:s:c:")) >= 0)
+	{
+		switch (i)
+		{
+		case 'f':
+			opt_foreground=1;
+			log_stream=stdout;
+			break;
+		case 'd':
+			debuglevel=atoi(optarg);
+			break;
+		case 'c':
+			pppoe_up[client_pppoe]=openPPPoEInterface(optarg, discovery_cb);
+			client_pppoe++;
+			break;
+		case 's':
+			if (pppoe_dn) {
+				sysFatal("Can only specify one server\n");
+			}
+			pppoe_dn=openPPPoEInterface(optarg, discovery_cb);
+			break;
+		default:
+			printf("Args are:\n"
+			       "\t-f\t\tStay in foreground\n"
+			       "\t-d <debug>\tSet debuglevel\n"
+			       "\t-h <hostname>\tForce hostname\n"
+			       "\t-v\t\tDebug\n");
+
+			return (0);
+			break;
+		}
+	}
+
+	if (!opt_foreground) {
+		if (fork()) exit(0);
+		setsid();
+		if(!freopen("/dev/null", "r", stdin)) LOG(0, 0, 0, "Error freopen stdin: %s\n", strerror(errno));
+		if(!freopen("/dev/null", "w", stdout)) LOG(0, 0, 0, "Error freopen stdout: %s\n", strerror(errno));
+		if(!freopen("/dev/null", "w", stderr)) LOG(0, 0, 0, "Error freopen stderr: %s\n", strerror(errno));
+	}
+
 	srand(getpid());
 	initEvent();
-	pppoe_dn=openPPPoEInterface(INTERFACE_DN, discovery_cb);
-	if (strcmp(INTERFACE_DN, INTERFACE_UP1)) {
-		pppoe_up1=openPPPoEInterface(INTERFACE_UP1, discovery_cb);
-	} else {
-		pppoe_up1=pppoe_dn;
-	}
-	if (strcmp(INTERFACE_UP1, INTERFACE_UP2)) {
-		pppoe_up2=openPPPoEInterface(INTERFACE_UP2, discovery_cb);
-	} else {
-		pppoe_up2=pppoe_up1;
-	}
 
 	discoveryServer(pppoe_dn, NULL, NULL);
 	dispatchEvent();

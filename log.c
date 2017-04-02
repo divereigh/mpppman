@@ -30,6 +30,10 @@
 #include <time.h>
 #endif
 
+#ifdef HAVE_SYSLOG_H
+#include <syslog.h>
+#endif
+
 #ifdef HAVE_NET_ETHERNET_H
 #include <net/ethernet.h>
 #endif
@@ -37,6 +41,7 @@
 #include "log.h"
 
 FILE *log_stream;
+int syslog_log=0;
 
 /**********************************************************************
 *%FUNCTION: fatalSys
@@ -115,10 +120,8 @@ void _log(int level, const PPPoESession *pppoe, const char *format, ...)
 
 	if (log_stream)
 		fprintf(log_stream, "%s [%04x-%-3s] %s", time_now_string, pppoe ? pppoe->sid : 0, pppoe ? pppoe->label : "", message);
-/*
 	else if (syslog_log)
-		syslog(level + 2, "%s", message); // We don't need LOG_EMERG or LOG_ALERT
-*/
+		syslog(level + 2, "[%04x-%-3s] %s", pppoe ? pppoe->sid : 0, pppoe ? pppoe->label : "", message); // We don't need LOG_EMERG or LOG_ALERT
 
 	va_end(ap);
 }

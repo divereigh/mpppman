@@ -113,7 +113,7 @@ void ppp_cb(PPPSession *pppSession, int action)
 			}
 		} else if (action==PPPCBACT_IPCPOK) {
 			for (i=0; i<MAX_LINK; i++) {
-				if (upstream[i] && upstream[i]->pppSession) {
+				if (upstream[i] && upstream[i]->pppSession && upstream[i]->pppSession->bundle!=NULL) {
 					LOG(3, pppSession->pppoeSession, "Link sessions to upstream %d\n", i);
 					upstream[i]->pppSession->link=downstream->pppSession;
 					downstream->pppSession->link=upstream[i]->pppSession;
@@ -184,7 +184,7 @@ void ppp_cb(PPPSession *pppSession, int action)
 				LOG(3, pppSession->pppoeSession, "Unlink and restart session\n");
 				pppSession->link=NULL;
 				if (downstream->pppSession->link==pppSession) {
-					for (i=0; i<MAX_LINK && upstream[i]==NULL || upstream[i]->pppSession==NULL; i++);
+					for (i=0; i<MAX_LINK && (upstream[i]==NULL || upstream[i]->pppSession==NULL || upstream[i]->pppSession->bundle==NULL); i++);
 					if (i<MAX_LINK) {
 						downstream->pppSession->link=upstream[i]->pppSession;
 					} else {

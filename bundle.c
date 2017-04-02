@@ -320,6 +320,8 @@ void processmp(PPPSession *pppSession, uint8_t *p, uint16_t l)
 					if (s_seq < Mmin)
 						Mmin = s_seq;
 				}
+			} else {
+				LOG(3, this_bundle->members[i]->pppoeSession, "MPPP: Skipping session - not responding\n");
 			}
 		}
 		if (first) {

@@ -486,6 +486,8 @@ void processip_out(PPPSession *pppSession, uint8_t *buf, int len)
 			{
 				members[nb_opened] = pS;
 				nb_opened++;
+			} else {
+				LOG(3, pS->pppoeSession, "MPPP: Skipping session - not responding\n");
 			}
 		}
 

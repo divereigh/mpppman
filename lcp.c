@@ -20,6 +20,9 @@
 #include "auth.h"
 #include "ip.h"
 
+#define DEAD_TIMER 1 /* Time between echo packets, session killed after DEAD_LOST missed ones */
+#define DEAD_LOST 10
+
 static uint32_t mp_epdis_magic=0;
 
 void dumplcp(const PPPoESession *pppoe, uint8_t *p, int l)
@@ -85,8 +88,8 @@ void dumplcp(const PPPoESession *pppoe, uint8_t *p, int l)
 				break;
 			case 4: // Quality-Protocol
 				{
-					uint32_t qp = ntohl(*(uint32_t *)(o + 2));
-					LOG(4, pppoe, "    %s %x\n", ppp_lcp_option(type), qp);
+					uint16_t qp = ntohs(*(uint16_t *)(o + 2));
+					LOG(4, pppoe, "    %s %04x\n", ppp_lcp_option(type), qp);
 				}
 				break;
 			case 5: // Magic-Number
@@ -127,6 +130,76 @@ void dumplcp(const PPPoESession *pppoe, uint8_t *p, int l)
 		}
 		x -= length;
 		o += length;
+	}
+}
+
+void sendLCPEcho(PPPSession *pppSession)
+{
+	uint8_t b[MAXETHER];
+
+	uint8_t *q = pppoe_makeppp(b, sizeof(b), NULL, 0, pppSession, PPP_LCP, 1, 0, 0);
+	if (!q) return;
+
+	*q = EchoReq;
+	*(uint8_t *)(q + 1) = (time_now % 255); // ID
+	*(uint16_t *)(q + 2) = htons(8); // Length
+	*(uint32_t *)(q + 4) = pppSession->ppp.lcp == Opened ? htonl(pppSession->magic) : 0; // Magic Number
+
+	LOG(3, pppSession->pppoeSession, "LCP: Send EchoReq\n");
+	pppSession->last_echo=time_now;
+	pppoe_sess_send(pppSession->pppoeSession, b, (q - b) + 8); // send it
+}
+
+void dead_timer(PPPSession *pppSession)
+{
+	LOG(3, pppSession->pppoeSession, "LCP: Start dead timer: %d\n", DEAD_TIMER);
+	startTimer(pppSession->lcp.timerEvent, DEAD_TIMER);
+}
+
+void checkDead(PPPSession *pppSession)
+{
+	LOG(3, pppSession->pppoeSession, "LCP: last_packet=%d secs ago\n", time_now - pppSession->last_packet);
+	if (time_now - pppSession->last_packet > DEAD_TIMER * DEAD_LOST) {
+		LOG(1, pppSession->pppoeSession, "LCP: No activity since for %d secs - terminate session\n", time_now - pppSession->last_packet);
+		sessionshutdown(pppSession, 1, "Link dead timer expired");
+	}
+}
+
+void lcp_timer_cb(PPPSession *pppSession)
+{
+	int next_state = pppSession->ppp.lcp;
+	LOG(3, pppSession->pppoeSession, "LCP: timeout: state %s, phase %s\n", ppp_state(pppSession->ppp.lcp), ppp_phase(pppSession->ppp.phase));
+	if (pppSession->ppp.phase==Authenticate) {
+		do_auth(pppSession);
+	} else if (pppSession->ppp.phase==Network) {
+		checkDead(pppSession);
+		sendLCPEcho(pppSession);
+		dead_timer(pppSession);
+	} else {
+		switch (pppSession->ppp.lcp)
+		{
+		case RequestSent:
+		case AckReceived:
+			next_state = RequestSent;
+
+		case AckSent:
+			if (pppSession->lcp.conf_sent < ppp_max_configure)
+			{
+				LOG(3, pppSession->pppoeSession, "No ACK for LCP ConfigReq... resending\n");
+				sendLCPConfigReq(pppSession);
+				change_state(pppSession, lcp, next_state);
+			}
+			else
+			{
+				sessionshutdown(pppSession, 1, "No response to LCP ConfigReq.");
+			}
+			break;
+
+		case Closing:
+			LOG(3, pppSession->pppoeSession, "Timer expired on close - kill the session\n");
+			sessionkill(pppSession);
+			break;
+		}
 	}
 }
 
@@ -238,6 +311,15 @@ void sendLCPConfigReq(PPPSession *pppSession)
 		l += 4;
 	}
 
+        if (pppSession->lqr)
+        {
+		*l++ = 4; *l++ = 8;		// Quality Protocol (length 8)
+		*(uint16_t *)l = htons(PPP_LQR);	// Link Quality Report
+		l += 2;
+		*(uint32_t *) l = htonl(pppSession->lqr_interval); // Interval in 100ths of sec
+		l += 4;
+	}
+
 	*(uint16_t *)(q + 2) = htons(l - q); // Length
 
 	LOG_HEX(5, pppSession->pppoeSession, "PPP_LCP", q, l - q);
@@ -264,6 +346,8 @@ void lcp_open(PPPSession *pppSession)
 	}
 	else
 	{
+		dead_timer(pppSession);
+
 #if 0
 // TODO Bundle
 		if(session[s].bundle == 0 || bundle[session[s].bundle].num_of_links == 1)
@@ -319,6 +403,8 @@ void set_lcp_options(PPPSession *pppSession)
 			// LOG(3, NULL, "mp_epdis_magic=%s\n", fmtBinary(&mp_epdis_magic, sizeof(mp_epdis_magic)));
 		}
 		pppSession->mp_epdis = mp_epdis_magic;
+		pppSession->lqr=1;
+		pppSession->lqr_interval=100; /* Every second */
 	}
 }
 
@@ -708,6 +794,24 @@ void processlcp(PPPSession *pppSession, uint8_t *p, uint16_t l)
 
 					break;
 
+				case 4: // Quality Protocol
+				{
+					
+					int lqr_type = ntohs(*(uint16_t *)(o + 2));
+
+					if (*p == ConfigNak && lqr_type==PPP_LQR)
+					{
+						pppSession->lqr_interval = ntohl(*(uint32_t *)(o + 4));
+						LOG(3, pppSession->pppoeSession, "    Remote requested LQR interval of %u\n", pppSession->lqr_interval);
+					}
+					else
+					{
+						pppSession->lqr = 0;
+						LOG(3, pppSession->pppoeSession, "    Remote rejected LQR negotiation\n");
+					}
+				}
+				break;
+
 				case 5: // Magic-Number
 					pppSession->magic = 0;
 					if (*p == ConfigNak)
@@ -924,7 +1028,8 @@ void processlcp(PPPSession *pppSession, uint8_t *p, uint16_t l)
 	}
 	else if (*p == EchoReply)
 	{
-		// Ignore it, last_packet time is set earlier than this.
+		// Set last_echo_reply time
+		pppSession->last_echo_reply=time_now;
 	}
 	else if (*p != CodeRej)
 	{

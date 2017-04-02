@@ -306,12 +306,25 @@ void processmp(PPPSession *pppSession, uint8_t *p, uint16_t l)
 	}
 	else
 	{
-		Mmin = this_bundle->members[0]->last_seq;
-		for (i = 1; i < this_bundle->num_of_links; i++)
+		int first=1;
+		Mmin = 0;
+		for (i = 0; i < this_bundle->num_of_links; i++)
 		{
-			uint32_t s_seq = this_bundle->members[i]->last_seq;
-			if (s_seq < Mmin)
-				Mmin = s_seq;
+			// Only include sessions where we have received a echo reply in the last 2 secs
+			if (this_bundle->members[i]->last_echo - this_bundle->members[i]->last_echo_reply < 2) {
+				if (first) {
+					Mmin = this_bundle->members[i]->last_seq;
+					first=0;
+				} else {
+					uint32_t s_seq = this_bundle->members[i]->last_seq;
+					if (s_seq < Mmin)
+						Mmin = s_seq;
+				}
+			}
+		}
+		if (first) {
+			LOG(2, pppSession->pppoeSession, "MPPP: No responding bundles!\n");
+			return;
 		}
 		this_fragmentation->M = Mmin;
 	}

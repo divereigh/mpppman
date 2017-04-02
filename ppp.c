@@ -35,6 +35,7 @@ int ppp_max_configure=10;
 int radius_authtypes=AUTHPAP;
 int radius_authprefer=AUTHPAP;
 int MRU=1462;
+int ppp_echo_time=10;
 
 
 /* Find a session that has the given session id, 0 will find a free session
@@ -57,36 +58,7 @@ static void ppp_timer_cb(evutil_socket_t fd, short what, void *arg)
 	struct cpStruct *cp=(struct cpStruct *) arg;
 	PPPSession *pppSession=cp->pppSession;
 	if (cp==&pppSession->lcp) {
-		int next_state = pppSession->ppp.lcp;
-		LOG(3, pppSession->pppoeSession, "LCP: timeout: state %s, phase %s\n", ppp_state(pppSession->ppp.lcp), ppp_phase(pppSession->ppp.phase));
-		if (pppSession->ppp.phase==Authenticate) {
-			do_auth(pppSession);
-		} else {
-			switch (pppSession->ppp.lcp)
-			{
-			case RequestSent:
-			case AckReceived:
-				next_state = RequestSent;
-
-			case AckSent:
-				if (pppSession->lcp.conf_sent < ppp_max_configure)
-				{
-					LOG(3, pppSession->pppoeSession, "No ACK for LCP ConfigReq... resending\n");
-					sendLCPConfigReq(pppSession);
-					change_state(pppSession, lcp, next_state);
-				}
-				else
-				{
-					sessionshutdown(pppSession, 1, "No response to LCP ConfigReq.");
-				}
-				break;
-
-			case Closing:
-				LOG(3, pppSession->pppoeSession, "Timer expired on close - kill the session\n");
-				sessionkill(pppSession);
-				break;
-			}
-		}
+		lcp_timer_cb(pppSession);
 
 	} else if (cp==&pppSession->ipcp) {
 		LOG(3, pppSession->pppoeSession, "Got a timeout event for IPCP\n");

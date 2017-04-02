@@ -131,8 +131,8 @@ void PPPoE_cb_func(evutil_socket_t fd, short what, void *arg)
 	int s;
 	const PPPoEInterface *pppoe = (PPPoEInterface *) arg;
 
-	LOG(3, NULL, "===========================================\n");
-	LOG(3, NULL, "Got an event on socket %d:%s%s%s%s %s\n",
+	LOG(5, NULL, "===========================================\n");
+	LOG(5, NULL, "Got an event on socket %d:%s%s%s%s %s\n",
 		(int) fd,
 		(what&EV_TIMEOUT) ? " timeout" : "",
 		(what&EV_READ)    ? " read" : "",
@@ -220,7 +220,7 @@ int pppoeIsSessionUnique(char *avc_id)
 {
 	int i;
 
-	// return(1);
+	return(1);
 	for (i=0; i<MAX_PPPOE_SESSION; i++) {
 		// LOG(0, NULL, "Checking %d: sid=%d, hostUniqLen=%d\n", i, pppoe_sessions[i].sid, (long) pppoe_sessions[i].hostUniqLen);
 		if ((pppoe_sessions[i].sid!=0 || pppoe_sessions[i].hostUniqLen!=0) && strcmp(avc_id, pppoe_sessions[i].avc_id)==0) {

@@ -135,6 +135,9 @@ typedef struct PPPSessionStruct {
 	time_t last_data;		// Last data packet to/from the user (used for idle timeouts)
 	char user[MAXUSER];		// username for session
 	char pass[MAXPASS];		// password for session
+	
+	uint8_t lqr;			// Should we do LQR
+	uint32_t lqr_interval;		// LQR Timer (100'ths of seconds)
 
 	ppp_cb_func cb;			// Call back function for stages of PPP
 
@@ -184,6 +187,8 @@ typedef struct PPPSessionStruct {
 
 	// last LCP Echo
 	time_t last_echo;
+	// Last LCP Echo Reply Received
+	time_t last_echo_reply;
 
 	// Last Multilink frame sequence number received
 	uint32_t last_seq;

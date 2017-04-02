@@ -451,6 +451,7 @@ void processip_out(PPPSession *pppSession, uint8_t *buf, int len)
 
 	uint8_t fragbuf[MAXETHER + 20];
 
+	LOG(3, pppSession->pppoeSession, "Xmit IP Packet\n");
 	if (len < MIN_IP_SIZE)
 	{
 		LOG(1, pppSession->pppoeSession, "Short IP, %d bytes\n", len);
@@ -549,7 +550,8 @@ void processip_out(PPPSession *pppSession, uint8_t *buf, int len)
 		for (i = 0;i < num_of_links;i++)
 		{
 			PPPSession *pS = b->members[i];
-			if (pS->ppp.lcp == Opened)
+			// Only include sessions where we have received a echo reply in the last 2 secs
+			if (pS->ppp.lcp == Opened && (pS->last_echo-pS->last_echo_reply < 2))
 			{
 				members[nb_opened] = pS;
 				nb_opened++;
@@ -655,11 +657,16 @@ void processip_in(PPPSession *pppSession, uint8_t *pack, int size)
 	uint8_t *q;
 	LOG(3, pppSession->pppoeSession, "Recv IP Packet\n");
 
-	if (pppSession->ppp.phase != Network || pppSession->ppp.ipcp != Opened)
+	if (pppSession->ppp.phase != Network || pppSession->ppp.ipcp != Opened) {
+		LOG(1, pppSession->pppoeSession, "IP: Incoming Session not open: state %s, phase %s\n", ppp_state(pppSession->ppp.ipcp), ppp_phase(pppSession->ppp.phase));
                 return;
+	}
+
 	if (pppSession->link) {
-		if (pppSession->link->ppp.phase != Network || pppSession->link->ppp.ipcp != Opened)
+		if (pppSession->link->ppp.phase != Network || pppSession->link->ppp.ipcp != Opened) {
+			LOG(1, pppSession->link->pppoeSession, "IP: Link Session not open: state %s, phase %s\n", ppp_state(pppSession->link->ppp.ipcp), ppp_phase(pppSession->link->ppp.phase));
 			return;
+		}
 
 		processip_out(pppSession->link, pack, size);
 #if 0
@@ -668,6 +675,8 @@ void processip_in(PPPSession *pppSession, uint8_t *pack, int size)
 			pppoe_sess_send(pppSession->link->pppoeSession, buf, size + (q - buf)); // send it
 		}
 #endif
+	} else {
+		LOG(2, pppSession->pppoeSession, "No linked session to send data to\n");
 	}
 }
 

@@ -14,5 +14,6 @@ void sendLCPTerminateReq(PPPSession *pppSession, const char *reason);
 void dumplcp(const PPPoESession *pppoe, uint8_t *p, int l);
 void lcp_open(PPPSession *pppSession);
 void set_lcp_options(PPPSession *pppSession);
+void lcp_timer_cb(PPPSession *pppSession);
 
 #endif

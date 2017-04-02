@@ -52,9 +52,11 @@
 #include "auth.h"
 #include "ip.h"
 
-#define INTERFACE1 "vlan50"
-#define INTERFACE2 "vlan51"
-int debuglevel=4;
+#define SINGLE_INTERFACE 0
+#define INTERFACE_DN "vlan50"
+#define INTERFACE_UP1 "vlan50"
+#define INTERFACE_UP2 "vlan51"
+int debuglevel=3;
 time_t time_now = 0;
 uint64_t time_now_ms = 0;		// Current time in milliseconds since epoch.
 
@@ -74,8 +76,9 @@ PPPoESession *downstream=NULL;
 PPPoESession *upstream1;
 PPPoESession *upstream2;
 
-PPPoEInterface *pppoe1;
-PPPoEInterface *pppoe2;
+PPPoEInterface *pppoe_dn;
+PPPoEInterface *pppoe_up1;
+PPPoEInterface *pppoe_up2;
 
 /* Stages of sessions are:
 Downstream
@@ -111,9 +114,13 @@ void ppp_cb(PPPSession *pppSession, int action)
 			}
 		} else if (action==PPPCBACT_IPCPOK) {
 			if (upstream1 && upstream1->pppSession) {
-				LOG(3, pppSession->pppoeSession, "Link sessions\n");
+				LOG(3, pppSession->pppoeSession, "Link sessions to upstream1\n");
 				upstream1->pppSession->link=downstream->pppSession;
 				downstream->pppSession->link=upstream1->pppSession;
+			} else if (upstream2 && upstream2->pppSession) {
+				LOG(3, pppSession->pppoeSession, "Link sessions to upstream2\n");
+				upstream2->pppSession->link=downstream->pppSession;
+				downstream->pppSession->link=upstream2->pppSession;
 			}
 		} else if (action==PPPCBACT_SHUTDOWN) {
 			downstream->closing=1;
@@ -123,104 +130,69 @@ void ppp_cb(PPPSession *pppSession, int action)
 				upstream1->pppSession->link=NULL;
 				sessionshutdown(upstream1->pppSession, 1, "Local terminate request");
 			}
-			if (upstream2 && upstream1->pppSession) {
+			if (upstream2 && upstream2->pppSession) {
 				LOG(3, pppSession->pppoeSession, "Un-link sessions and shutdown upstream2\n");
 				upstream2->pppSession->link=NULL;
 				sessionshutdown(upstream2->pppSession, 1, "Local terminate request");
 			}
 		}
-	} else if (((pppSession->flags & SESSION_CLIENT)) && pppSession->pppoeSession == upstream1) {
+	} else if (((pppSession->flags & SESSION_CLIENT))) {
 		// Upstream
 		if (action==PPPCBACT_AUTHREQ) {
 			if (downstream && downstream->pppSession && (downstream->pppSession->flags & SESSION_GOTAUTH)) {
 				LOG(3, pppSession->pppoeSession, "Fetch auth info from downstream\n");
-				strcpy(upstream1->pppSession->user, downstream->pppSession->user);
-				strcpy(upstream1->pppSession->pass, downstream->pppSession->pass);
-				upstream1->pppSession->flags |= SESSION_GOTAUTH;
+				strcpy(pppSession->user, downstream->pppSession->user);
+				strcpy(pppSession->pass, downstream->pppSession->pass);
+				pppSession->flags |= SESSION_GOTAUTH;
 			}
 		} else if (action==PPPCBACT_AUTHOK) {
 			if (downstream && downstream->pppSession) {
 				LOG(3, pppSession->pppoeSession, "We have authok, flag this with downstream\n");
-				LOG(3, pppSession->pppoeSession, "trigger downstream auth\n");
 				downstream->pppSession->flags |= SESSION_AUTHOK;
-				upstream1->pppSession->flags |= SESSION_AUTHOK;
+				pppSession->flags |= SESSION_AUTHOK;
 				// Wait for next auth request from downstream
 			}
 		} else if (action==PPPCBACT_IPCPOK) {
 			if (downstream && downstream->pppSession) {
-				if (downstream->pppSession->ip_local != upstream1->pppSession->ip_remote
-					|| downstream->pppSession->ip_remote != upstream1->pppSession->ip_local) {
+				if (downstream->pppSession->ip_local != pppSession->ip_remote
+					|| downstream->pppSession->ip_remote != pppSession->ip_local) {
 					// Different (or new) IP addresses from upstream1
 					LOG(3, pppSession->pppoeSession, "trigger downstream IPCP\n");
-					downstream->pppSession->ip_local=upstream1->pppSession->ip_remote;
-					downstream->pppSession->ip_remote=upstream1->pppSession->ip_local;
+					downstream->pppSession->ip_local=pppSession->ip_remote;
+					downstream->pppSession->ip_remote=pppSession->ip_local;
 					sendipcp(downstream->pppSession);
-#if 0
-					/* Start another session */
-					LOG(3, pppSession->pppoeSession, "Client count: %d\n", discoveryClientCount());
-					if (discoveryClientCount()<2) {
-						if (upstream1==NULL) {
-							discoveryClient(pppoe1, NULL, NULL, 10); // Lose the const
-						} else {
-							discoveryClient(pppoe2, NULL, NULL, 10); // Lose the const
-						}
-					}
-#endif
 				} else {
 					// Just link the sessions back together
 					LOG(3, pppSession->pppoeSession, "Link sessions\n");
-					upstream1->pppSession->link=downstream->pppSession;
-					downstream->pppSession->link=upstream1->pppSession;
+					pppSession->link=downstream->pppSession;
+					if (downstream->pppSession->link==NULL) {
+						downstream->pppSession->link=pppSession;
+					}
 				}
-			}
-		} else if (action==PPPCBACT_SHUTDOWN) {
-			upstream1->closing=1;
-			if (downstream && downstream->pppSession && downstream->closing==0) {
-				LOG(3, pppSession->pppoeSession, "Unlink and restart upstream1 session\n");
-				upstream1->pppSession->link=NULL;
-				if (downstream->pppSession->link==upstream1->pppSession) {
-					if (upstream2 && upstream2->pppSession && upstream2->closing==0) {
-						downstream->pppSession->link=upstream2->pppSession;
+				/* Start another session */
+				LOG(3, pppSession->pppoeSession, "Client count: %d\n", discoveryClientCount());
+				if (discoveryClientCount()<2) {
+					if (upstream1==NULL) {
+						discoveryClient(pppoe_up1, NULL, NULL, 10);
 					} else {
-						downstream->pppSession->link=NULL;
+						discoveryClient(pppoe_up2, NULL, NULL, 10);
 					}
-				}
-				discoveryClient((PPPoEInterface *) pppSession->pppoeSession->iface, NULL, NULL, 10); // Lose the const
-			}
-		}
-	} else if (((pppSession->flags & SESSION_CLIENT)) && pppSession->pppoeSession == upstream2) {
-		// Upstream
-		if (action==PPPCBACT_AUTHREQ) {
-			if (downstream && downstream->pppSession && (downstream->pppSession->flags & SESSION_GOTAUTH)) {
-				LOG(3, pppSession->pppoeSession, "Fetch auth info from downstream\n");
-				strcpy(upstream2->pppSession->user, downstream->pppSession->user);
-				strcpy(upstream2->pppSession->pass, downstream->pppSession->pass);
-				upstream2->pppSession->flags |= SESSION_GOTAUTH;
-			}
-		} else if (action==PPPCBACT_AUTHOK) {
-			if (downstream && downstream->pppSession) {
-				upstream2->pppSession->flags |= SESSION_AUTHOK;
-				// Wait for next auth request from downstream
-			}
-		} else if (action==PPPCBACT_IPCPOK) {
-			if (downstream && downstream->pppSession) {
-				if (downstream->pppSession->ip_local == upstream2->pppSession->ip_remote
-					|| downstream->pppSession->ip_remote == upstream2->pppSession->ip_local) {
-					// Just link the sessions back together
-					LOG(3, pppSession->pppoeSession, "Link sessions\n");
-					upstream2->pppSession->link=downstream->pppSession;
-				} else {
-					LOG(1, pppSession->pppoeSession, "Mismatched IP address\n");
 				}
 			}
 		} else if (action==PPPCBACT_SHUTDOWN) {
-			upstream2->closing=1;
+			if (pppSession->pppoeSession==upstream1) {
+				upstream1=NULL;
+			} else {
+				upstream2=NULL;
+			}
 			if (downstream && downstream->pppSession && downstream->closing==0) {
-				LOG(3, pppSession->pppoeSession, "Unlink and restart upstream2 session\n");
-				upstream2->pppSession->link=NULL;
-				if (downstream->pppSession->link==upstream2->pppSession) {
+				LOG(3, pppSession->pppoeSession, "Unlink and restart session\n");
+				pppSession->link=NULL;
+				if (downstream->pppSession->link==pppSession) {
 					if (upstream1 && upstream1->pppSession && upstream1->closing==0) {
 						downstream->pppSession->link=upstream1->pppSession;
+					} else if (upstream2 && upstream2->pppSession && upstream2->closing==0) {
+						downstream->pppSession->link=upstream2->pppSession;
 					} else {
 						downstream->pppSession->link=NULL;
 					}
@@ -240,7 +212,6 @@ void discovery_cb(PPPoESession *pppoeSession, int action)
 			strcpy(pppoeSession->label, "dn ");
 			pppServer(pppoeSession, ppp_cb);
 
-			// Trigger 1
 			discoveryClient((PPPoEInterface *) pppoeSession->iface, NULL, NULL, 10); // Lose the const
 		} else {
 			LOG(3, pppoeSession, "discover client session started %s/%s\n", pppoeSession->ac_name, pppoeSession->service_name);
@@ -274,15 +245,19 @@ int main() {
 	log_stream=stdout;
 	srand(getpid());
 	initEvent();
-	pppoe1=openPPPoEInterface(INTERFACE1, discovery_cb);
-	pppoe2=openPPPoEInterface(INTERFACE2, discovery_cb);
-	discoveryServer(pppoe1, NULL, NULL);
-	//discoveryClient(pppoe, NULL, NULL, 10);
+	pppoe_dn=openPPPoEInterface(INTERFACE_DN, discovery_cb);
+	if (strcmp(INTERFACE_DN, INTERFACE_UP1)) {
+		pppoe_up1=openPPPoEInterface(INTERFACE_UP1, discovery_cb);
+	} else {
+		pppoe_up1=pppoe_dn;
+	}
+	if (strcmp(INTERFACE_UP1, INTERFACE_UP2)) {
+		pppoe_up2=openPPPoEInterface(INTERFACE_UP2, discovery_cb);
+	} else {
+		pppoe_up2=pppoe_up1;
+	}
 
-	// ev1=event_new(base, pppoe->discoverySock, EV_TIMEOUT|EV_READ|EV_PERSIST, cb_func, (char *) "Reading event");
-	// ev1=event_new(base, 0, EV_TIMEOUT, cb_func, (char *) "Reading event");
-
-	// event_add(ev1, &five_seconds);
+	discoveryServer(pppoe_dn, NULL, NULL);
 	dispatchEvent();
 }
 

@@ -41,14 +41,14 @@ void processpap(PPPSession *pppSession, uint8_t *p, int l)
 	LOG_HEX(5, pppSession->pppoeSession, "PAP", p, l);
 	if (l < 4)
 	{
-		LOG(1, pppSession->pppoeSession, "Short PAP %u bytes\n", l);
+		LOG(1, pppSession->pppoeSession, "LCP AUTH: Short PAP %u bytes\n", l);
 		sessionshutdown(pppSession, 1, "Short PAP packet.");
 		return;
 	}
 
 	if ((hl = ntohs(*(uint16_t *) (p + 2))) > l)
 	{
-		LOG(1, pppSession->pppoeSession, "Length mismatch PAP %u/%u\n", hl, l);
+		LOG(1, pppSession->pppoeSession, "LCP AUTH: Length mismatch PAP %u/%u\n", hl, l);
 		sessionshutdown(pppSession, 1, "PAP length mismatch.");
 		return;
 	}
@@ -57,18 +57,18 @@ void processpap(PPPSession *pppSession, uint8_t *p, int l)
 	if (pppSession->flags & SESSION_CLIENT) {
 		if (*p != 2 && *p != 3)
 		{
-			LOG(1, pppSession->pppoeSession, "Unexpected PAP code %d\n", *p);
+			LOG(1, pppSession->pppoeSession, "LCP AUTH: Unexpected PAP code %d\n", *p);
 			sessionshutdown(pppSession, 1, "Unexpected PAP code.");
 			return;
 		}
 		if (*p == 2) {
-			LOG(3, pppSession->pppoeSession, "Authentication succeeded\n");
+			LOG(3, pppSession->pppoeSession, "LCP AUTH: Authentication succeeded\n");
 			pppSession->flags |= SESSION_AUTHOK;
 			(*pppSession->cb)(pppSession, PPPCBACT_AUTHOK);
 			pppSession->lcp_authtype=0; // Signal auth complete
 			lcp_open(pppSession);
 		} else {
-			LOG(3, pppSession->pppoeSession, "Authentication failed\n");
+			LOG(3, pppSession->pppoeSession, "LCP AUTH: Authentication failed\n");
 			pppSession->flags &= ~SESSION_GOTAUTH;
 			pppSession->user[0]='\0';
 			pppSession->pass[0]='\0';
@@ -78,14 +78,14 @@ void processpap(PPPSession *pppSession, uint8_t *p, int l)
 	} else {
 		if (*p != 1)
 		{
-			LOG(1, pppSession->pppoeSession, "Unexpected PAP code %d\n", *p);
+			LOG(1, pppSession->pppoeSession, "LCP AUTH: Unexpected PAP code %d\n", *p);
 			sessionshutdown(pppSession, 1, "Unexpected PAP code.");
 			return;
 		}
 
 		if (pppSession->ppp.phase != Authenticate)
 		{
-			LOG(2, pppSession->pppoeSession, "PAP ignored in %s phase\n", ppp_phase(pppSession->ppp.phase));
+			LOG(2, pppSession->pppoeSession, "LCP AUTH: PAP ignored in %s phase\n", ppp_phase(pppSession->ppp.phase));
 			return;
 		}
 
@@ -104,7 +104,7 @@ void processpap(PPPSession *pppSession, uint8_t *p, int l)
 					pass[*b] = 0;
 				}
 			}
-			LOG(3, pppSession->pppoeSession, "PAP login %s/%s\n", user, pass);
+			LOG(3, pppSession->pppoeSession, "LCP AUTH: PAP login %s/%s\n", user, pass);
 			if ((pppSession->flags & SESSION_AUTHOK)==0) {
 				/* Not authenticated yet */
 				if ((pppSession->flags & SESSION_GOTAUTH)==0) {
@@ -113,17 +113,17 @@ void processpap(PPPSession *pppSession, uint8_t *p, int l)
 					pppSession->flags |= SESSION_GOTAUTH;
 				}
 				if ((strcmp(pppSession->user, user)==0 && strcmp(pppSession->pass, pass)==0)) {
-					LOG(3, pppSession->pppoeSession, "Waiting for auth (from elsewhere)\n");
+					LOG(3, pppSession->pppoeSession, "LCP AUTH: Waiting for auth (from elsewhere)\n");
 					(*pppSession->cb)(pppSession, PPPCBACT_AUTHREQ);
 				}
 				return; // Silently ignore
 			} else if (strcmp(pppSession->user, user) || strcmp(pppSession->pass, pass)) {
 				/* Auth failed */
-				LOG(3, pppSession->pppoeSession, "Authentication failed\n");
+				LOG(3, pppSession->pppoeSession, "LCP AUTH: Authentication failed\n");
 				sendauthresp(pppSession, p[1], 3, "Auth Failed");
 				return;
 			} else {
-				LOG(3, pppSession->pppoeSession, "Authentication succeeded\n");
+				LOG(3, pppSession->pppoeSession, "LCP AUTH: Authentication succeeded\n");
 				sendauthresp(pppSession, p[1], 2, "Auth Suceeded");
 				pppSession->lcp_authtype=0; // Signal auth complete
 				lcp_open(pppSession);
@@ -155,7 +155,7 @@ void processpap(PPPSession *pppSession, uint8_t *p, int l)
 
 		if (pppSession->ip_remote)
 		{
-			LOG(3, pppSession->pppoeSession, "Already an IP allocated: %s\n",
+			LOG(3, pppSession->pppoeSession, "LCP AUTH: Already an IP allocated: %s\n",
 				fmtaddr(htonl(pppSession->ip_remote), 0));
 		}
 #if 0
@@ -166,34 +166,6 @@ void processpap(PPPSession *pppSession, uint8_t *p, int l)
 		}
 #endif
 	}
-#if 0
-	else
-	{
-		// Run PRE_AUTH plugins
-		struct param_pre_auth packet = { &tunnel[t], &session[s], strdup(user), strdup(pass), PPPPAP, 1 };
-		run_plugins(PLUGIN_PRE_AUTH, &packet);
-		if (!packet.continue_auth)
-		{
-			LOG(3, s, t, "A plugin rejected PRE_AUTH\n");
-			if (packet.username) free(packet.username);
-			if (packet.password) free(packet.password);
-			return;
-		}
-
-		strncpy(session[s].user, packet.username, sizeof(session[s].user) - 1);
-		strncpy(radius[r].pass, packet.password, sizeof(radius[r].pass) - 1);
-
-		free(packet.username);
-		free(packet.password);
-
-		radius[r].id = p[1];
-		LOG(3, s, t, "Sending login for %s/%s to RADIUS\n", user, pass);
-		if ((session[s].mrru) && (!first_session_in_bundle(s)))
-			radiussend(r, RADIUSJUSTAUTH);
-		else
-			radiussend(r, RADIUSAUTH);
-	}
-#endif
 }
 
 /* Process CHAP packet - pack points the PPP payload */
@@ -254,11 +226,11 @@ void sendpap(PPPSession *pppSession)
 	uint8_t *q, *p;
 
 	if (strlen(pppSession->user)==0) {
-		LOG(3, pppSession->pppoeSession, "No PAP auth available (yet)\n");
+		LOG(3, pppSession->pppoeSession, "LCP AUTH: No PAP auth available (yet)\n");
 		return;
 	}
 
-	LOG(1, pppSession->pppoeSession, "Send PAP auth: %s/%s\n", pppSession->user, pppSession->pass);
+	LOG(1, pppSession->pppoeSession, "LCP AUTH: Send PAP auth: %s/%s\n", pppSession->user, pppSession->pass);
 	q = pppoe_makeppp(b, sizeof(b), NULL, 0, pppSession, PPP_PAP, 0, 0, 0);
 	if (!q) return;
 
@@ -278,19 +250,19 @@ void sendpap(PPPSession *pppSession)
 /* Signal that the client can now authenticate */
 void set_auth(PPPSession *pppSession)
 {
-	LOG(3, pppSession->pppoeSession, "LCP: state %s, phase %s\n", ppp_state(pppSession->ppp.lcp), ppp_phase(pppSession->ppp.phase));
+	LOG(3, pppSession->pppoeSession, "LCP AUTH: state %s, phase %s\n", ppp_state(pppSession->ppp.lcp), ppp_phase(pppSession->ppp.phase));
 	if (pppSession->ppp.phase == Authenticate) {
 		if ((pppSession->flags & SESSION_GOTAUTH)==0) {
 			do_auth(pppSession);
 		}
 	} else {
-		LOG(3, pppSession->pppoeSession, "LCP: Skip set_auth, not in Authentication phase\n");
+		LOG(3, pppSession->pppoeSession, "LCP AUTH: Skip set_auth, not in Authentication phase\n");
 	}
 }
 
 void do_auth(PPPSession *pppSession)
 {
-	LOG(3, pppSession->pppoeSession, "LCP: state %s, phase %s\n", ppp_state(pppSession->ppp.lcp), ppp_phase(pppSession->ppp.phase));
+	LOG(3, pppSession->pppoeSession, "LCP AUTH: state %s, phase %s\n", ppp_state(pppSession->ppp.lcp), ppp_phase(pppSession->ppp.phase));
 	restart_timer(pppSession, lcp);
 	if (pppSession->ppp.phase == Authenticate) {
 		// Fetch username/password if required
@@ -304,6 +276,6 @@ void do_auth(PPPSession *pppSession)
 				sendchap(pppSession);
 		}
 	} else {
-		LOG(3, pppSession->pppoeSession, "LCP: Skip auth, not in Authentication phase\n");
+		LOG(3, pppSession->pppoeSession, "LCP AUTH: Skip auth, not in Authentication phase\n");
 	}
 }

@@ -231,7 +231,7 @@ void processmp(PPPSession *pppSession, uint8_t *p, uint16_t l)
 	uint8_t flags = *p;
 	uint16_t begin_index, end_index;
 
-	LOG(3, pppSession->pppoeSession, "Got MP packet\n");
+	LOG(4, pppSession->pppoeSession, "MPPP: Got MP packet\n");
 	// Perform length checking
 	if(l > MAXFRAGLEN)
 	{

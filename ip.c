@@ -80,20 +80,20 @@ void processipcp(PPPSession *pppSession, uint8_t *p, uint16_t l)
 	LOG_HEX(5, pppSession->pppoeSession, "IPCP", p, l);
 	if (l < 4)
 	{
-		LOG(1, pppSession->pppoeSession, "Short IPCP %d bytes\n", l);
+		LOG(1, pppSession->pppoeSession, "IPCP: Short IPCP %d bytes\n", l);
 		return ;
 	}
 
 	if ((hl = ntohs(*(uint16_t *) (p + 2))) > l)
 	{
-		LOG(1, pppSession->pppoeSession, "Length mismatch IPCP %u/%u\n", hl, l);
+		LOG(1, pppSession->pppoeSession, "IPCP: Length mismatch IPCP %u/%u\n", hl, l);
 		return ;
 	}
 	l = hl;
 
 	if (pppSession->ppp.phase < Network)
 	{
-	    	LOG(2, pppSession->pppoeSession, "IPCP %s ignored in %s phase\n", ppp_code(*p), ppp_phase(pppSession->ppp.phase));
+	    	LOG(2, pppSession->pppoeSession, "IPCP: IPCP %s ignored in %s phase\n", ppp_code(*p), ppp_phase(pppSession->ppp.phase));
 		return;
 	}
 
@@ -203,7 +203,7 @@ void processipcp(PPPSession *pppSession, uint8_t *p, uint16_t l)
 		}
 		else
 		{
-			LOG(1, pppSession->pppoeSession, "No IP in IPCP request\n");
+			LOG(1, pppSession->pppoeSession, "IPCP: No IP in IPCP request\n");
 			return;
 		}
 
@@ -347,7 +347,7 @@ void processipcp(PPPSession *pppSession, uint8_t *p, uint16_t l)
 		}
 		else
 		{
-			LOG(1, pppSession->pppoeSession, "No IP in IPCP request\n");
+			LOG(1, pppSession->pppoeSession, "IPCP: No IP in IPCP request\n");
 			return;
 		}
 
@@ -451,93 +451,24 @@ void processip_out(PPPSession *pppSession, uint8_t *buf, int len)
 
 	uint8_t fragbuf[MAXETHER + 20];
 
-	LOG(3, pppSession->pppoeSession, "Xmit IP Packet\n");
+	LOG(4, pppSession->pppoeSession, "IP: Xmit IP Packet\n");
 	if (len < MIN_IP_SIZE)
 	{
-		LOG(1, pppSession->pppoeSession, "Short IP, %d bytes\n", len);
+		LOG(1, pppSession->pppoeSession, "IP: Short IP, %d bytes\n", len);
 		return;
 	}
 	if (len >= MAXETHER)
 	{
-		LOG(1, pppSession->pppoeSession, "Oversize IP packet %d bytes\n", len);
+		LOG(1, pppSession->pppoeSession, "IP: Oversize IP packet %d bytes\n", len);
 		return;
 	}
 
 	if (len > pppSession->mru || (pppSession->mrru && len > pppSession->mrru))
 	{
-		LOG(3, pppSession->pppoeSession, "Packet size more than session MRU\n");
+		LOG(3, pppSession->pppoeSession, "IP: Packet size more than session MRU\n");
 		return;
 	}
 
-#if 0
-	// DoS prevention: enforce a maximum number of packets per 0.1s for a session
-	if (config->max_packets > 0)
-	{
-		if (sess_local[s].last_packet_out == TIME)
-		{
-			int max = config->max_packets;
-
-			// All packets for throttled sessions are handled by the
-			// master, so further limit by using the throttle rate.
-			// A bit of a kludge, since throttle rate is in kbps,
-			// but should still be generous given our average DSL
-			// packet size is 200 bytes: a limit of 28kbps equates
-			// to around 180 packets per second.
-			if (!config->cluster_iam_master && sp->throttle_out && sp->throttle_out < max)
-				max = sp->throttle_out;
-
-			if (++sess_local[s].packets_out > max)
-			{
-				sess_local[s].packets_dropped++;
-				return;
-			}
-		}
-		else
-		{
-			if (sess_local[s].packets_dropped)
-			{
-				INC_STAT(tun_rx_dropped, sess_local[s].packets_dropped);
-				LOG(3, s, t, "Dropped %u/%u packets to %s for %suser %s\n",
-					sess_local[s].packets_dropped, sess_local[s].packets_out,
-					fmtaddr(ip, 0), sp->throttle_out ? "throttled " : "",
-					sp->user);
-			}
-
-			sess_local[s].last_packet_out = TIME;
-			sess_local[s].packets_out = 1;
-			sess_local[s].packets_dropped = 0;
-		}
-	}
-
-	// adjust MSS on SYN and SYN,ACK packets with options
-	if ((ntohs(*(uint16_t *) (buf + 6)) & 0x1fff) == 0 && buf[9] == IPPROTO_TCP) // first tcp fragment
-	{
-		int ihl = (buf[0] & 0xf) * 4; // length of IP header
-		if (len >= ihl + 20 && (buf[ihl + 13] & TCP_FLAG_SYN) && ((buf[ihl + 12] >> 4) > 5))
-			adjust_tcp_mss(s, t, buf, len, buf + ihl);
-	}
-
-	if (sp->tbf_out)
-	{
-		if (!config->no_throttle_local_IP || !sessionbyip(ip_src))
-		{
-			// Are we throttling this session?
-			if (config->cluster_iam_master)
-				tbf_queue_packet(sp->tbf_out, data, size);
-			else
-				master_throttle_packet(sp->tbf_out, data, size);
-			return;
-		}
-	}
-
-	if (sp->walled_garden && !config->cluster_iam_master)
-	{
-		// We are walled-gardening this
-		master_garden_packet(s, data, size);
-		return;
-	}
-
-#endif
 	if(pppSession->bundle != NULL && pppSession->bundle->num_of_links > 1)
 	{
 		PPPSession *members[MAXBUNDLESES];
@@ -615,7 +546,7 @@ void processip_out(PPPSession *pppSession, uint8_t *buf, int len)
 				pppoe_sess_send(pppSession->pppoeSession, fragbuf, remain + (p-fragbuf)); // send it...
 				// update_session_out_stat(s, sp, remain);
 				if (remain != last_fraglen)
-					LOG(3, pppSession->pppoeSession, "PROCESSIPOUT ERROR REMAIN != LAST_FRAGLEN, %d != %d\n", remain, last_fraglen);
+					LOG(3, pppSession->pppoeSession, "MPPP: PROCESSIPOUT ERROR REMAIN != LAST_FRAGLEN, %d != %d\n", remain, last_fraglen);
 			}
 			else
 			{
@@ -655,7 +586,7 @@ void processip_in(PPPSession *pppSession, uint8_t *pack, int size)
 {
 	uint8_t buf[MAXETHER];
 	uint8_t *q;
-	LOG(3, pppSession->pppoeSession, "Recv IP Packet\n");
+	LOG(4, pppSession->pppoeSession, "IP: Recv IP Packet\n");
 
 	if (pppSession->ppp.phase != Network || pppSession->ppp.ipcp != Opened) {
 		LOG(1, pppSession->pppoeSession, "IP: Incoming Session not open: state %s, phase %s\n", ppp_state(pppSession->ppp.ipcp), ppp_phase(pppSession->ppp.phase));
@@ -676,7 +607,7 @@ void processip_in(PPPSession *pppSession, uint8_t *pack, int size)
 		}
 #endif
 	} else {
-		LOG(2, pppSession->pppoeSession, "No linked session to send data to\n");
+		LOG(2, pppSession->pppoeSession, "IP: No linked session to send data to\n");
 	}
 }
 

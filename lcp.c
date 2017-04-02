@@ -145,20 +145,20 @@ void sendLCPEcho(PPPSession *pppSession)
 	*(uint16_t *)(q + 2) = htons(8); // Length
 	*(uint32_t *)(q + 4) = pppSession->ppp.lcp == Opened ? htonl(pppSession->magic) : 0; // Magic Number
 
-	LOG(3, pppSession->pppoeSession, "LCP: Send EchoReq\n");
+	LOG(4, pppSession->pppoeSession, "LCP: Send EchoReq\n");
 	pppSession->last_echo=time_now;
 	pppoe_sess_send(pppSession->pppoeSession, b, (q - b) + 8); // send it
 }
 
 void dead_timer(PPPSession *pppSession)
 {
-	LOG(3, pppSession->pppoeSession, "LCP: Start dead timer: %d\n", DEAD_TIMER);
+	LOG(5, pppSession->pppoeSession, "LCP: Start dead timer: %d\n", DEAD_TIMER);
 	startTimer(pppSession->lcp.timerEvent, DEAD_TIMER);
 }
 
 void checkDead(PPPSession *pppSession)
 {
-	LOG(3, pppSession->pppoeSession, "LCP: last_packet=%d secs ago\n", time_now - pppSession->last_packet);
+	LOG(5, pppSession->pppoeSession, "LCP: last_packet=%d secs ago\n", time_now - pppSession->last_packet);
 	if (time_now - pppSession->last_packet > DEAD_TIMER * DEAD_LOST) {
 		LOG(1, pppSession->pppoeSession, "LCP: No activity since for %d secs - terminate session\n", time_now - pppSession->last_packet);
 		sessionshutdown(pppSession, 1, "Link dead timer expired");
@@ -168,7 +168,7 @@ void checkDead(PPPSession *pppSession)
 void lcp_timer_cb(PPPSession *pppSession)
 {
 	int next_state = pppSession->ppp.lcp;
-	LOG(3, pppSession->pppoeSession, "LCP: timeout: state %s, phase %s\n", ppp_state(pppSession->ppp.lcp), ppp_phase(pppSession->ppp.phase));
+	LOG(4, pppSession->pppoeSession, "LCP: timeout: state %s, phase %s\n", ppp_state(pppSession->ppp.lcp), ppp_phase(pppSession->ppp.phase));
 	if (pppSession->ppp.phase==Authenticate) {
 		do_auth(pppSession);
 	} else if (pppSession->ppp.phase==Network) {
@@ -237,7 +237,7 @@ void sendLCPTerminateReq(PPPSession *pppSession, const char *reason)
         if (!(q = pppoe_makeppp(b, sizeof(b), NULL, 0, pppSession, PPP_LCP, 0, 0, 0)))
 		return;
 
-	LOG(3, pppSession->pppoeSession, "LCP: state %s, phase %s\n", ppp_state(pppSession->ppp.lcp), ppp_phase(pppSession->ppp.phase));
+	LOG(4, pppSession->pppoeSession, "LCP: state %s, phase %s\n", ppp_state(pppSession->ppp.lcp), ppp_phase(pppSession->ppp.phase));
         LOG(3, pppSession->pppoeSession, "LCP: send TerminateReq\n");
 
 	l = q;
@@ -268,7 +268,7 @@ void sendLCPConfigReq(PPPSession *pppSession)
         if (!(q = pppoe_makeppp(b, sizeof(b), NULL, 0, pppSession, PPP_LCP, 0, 0, 0)))
 		return;
 
-	LOG(3, pppSession->pppoeSession, "LCP: state %s, phase %s\n", ppp_state(pppSession->ppp.lcp), ppp_phase(pppSession->ppp.phase));
+	LOG(4, pppSession->pppoeSession, "LCP: state %s, phase %s\n", ppp_state(pppSession->ppp.lcp), ppp_phase(pppSession->ppp.phase));
         LOG(3, pppSession->pppoeSession, "LCP: send ConfigReq%s%s%s including MP options\n",
 	    authtype ? " (" : "",
 	    authtype ? (authtype == AUTHCHAP ? "CHAP" : "PAP") : "",
@@ -415,7 +415,7 @@ void processlcp(PPPSession *pppSession, uint8_t *p, uint16_t l)
 	uint8_t *q = NULL;
 	uint16_t hl;
 
-	LOG(3, pppSession->pppoeSession, "LCP: state %s, phase %s\n", ppp_state(pppSession->ppp.lcp), ppp_phase(pppSession->ppp.phase));
+	LOG(4, pppSession->pppoeSession, "LCP: state %s, phase %s\n", ppp_state(pppSession->ppp.lcp), ppp_phase(pppSession->ppp.phase));
 	LOG_HEX(5, pppSession->pppoeSession, "LCP", p, l);
 	if (l < 4)
 	{

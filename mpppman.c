@@ -58,6 +58,7 @@
 #define INTERFACE_UP2 "vlan51"
 #define MAX_LINK 10
 int debuglevel=0;
+int link_count=0;
 time_t time_now = 0;
 uint64_t time_now_ms = 0;		// Current time in milliseconds since epoch.
 
@@ -165,7 +166,7 @@ void ppp_cb(PPPSession *pppSession, int action)
 				}
 				/* Start another session */
 				LOG(3, pppSession->pppoeSession, "Client count: %d\n", discoveryClientCount());
-				if (discoveryClientCount()<2) {
+				if (discoveryClientCount()<link_count) {
 					for (i=0; i<MAX_LINK && upstream[i]!=NULL; i++);
 					if (i<MAX_LINK) {
 						LOG(3, pppSession->pppoeSession, "Start client: %d\n", i);
@@ -234,7 +235,9 @@ int main(int argc, char *argv[]) {
 	int i;
 	log_stream=stdout;
 	int opt_foreground=0;
-	int client_pppoe=0;
+
+	srand(getpid());
+	initEvent();
 
 	// scan args
 	while ((i = getopt(argc, argv, "fd:s:c:")) >= 0)
@@ -249,8 +252,8 @@ int main(int argc, char *argv[]) {
 			debuglevel=atoi(optarg);
 			break;
 		case 'c':
-			pppoe_up[client_pppoe]=openPPPoEInterface(optarg, discovery_cb);
-			client_pppoe++;
+			pppoe_up[link_count]=openPPPoEInterface(optarg, discovery_cb);
+			link_count++;
 			break;
 		case 's':
 			if (pppoe_dn) {
@@ -277,9 +280,6 @@ int main(int argc, char *argv[]) {
 		if(!freopen("/dev/null", "w", stdout)) LOG(0, 0, 0, "Error freopen stdout: %s\n", strerror(errno));
 		if(!freopen("/dev/null", "w", stderr)) LOG(0, 0, 0, "Error freopen stderr: %s\n", strerror(errno));
 	}
-
-	srand(getpid());
-	initEvent();
 
 	discoveryServer(pppoe_dn, NULL, NULL);
 	dispatchEvent();

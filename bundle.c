@@ -260,7 +260,11 @@ void processmp(PPPSession *pppSession, uint8_t *p, uint16_t l)
 	else */
 	{
 		// Get 24 bit for seq number
+#if __BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__
 		seq_num = ntohl((*(uint32_t *) p) & 0xFFFFFF00);
+#else
+		seq_num = ((*(uint32_t *) p) & 0xFFFFFF00) >> 8;
+#endif
 		p += 4;
 		l -= 4;
 		// After this point the pointer should be advanced 4 bytes

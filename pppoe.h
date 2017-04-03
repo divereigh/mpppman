@@ -21,6 +21,10 @@ typedef void (*discovery_cb_func)(PPPoESession *, int);
 // For MD5 results
 typedef uint8_t hasht[16];
 
+#define DISC_CBACT_INIT  1
+#define DISC_CBACT_OPEN   2
+#define DISC_CBACT_SHUTDOWN 3
+
 #define MAX_PPPOE_SESSION 10
 
 typedef struct PPPSessionStruct PPPSession;

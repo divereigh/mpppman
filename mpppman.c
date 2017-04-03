@@ -201,33 +201,64 @@ void discovery_cb(PPPoESession *pppoeSession, int action)
 {
 	int i;
 
-	if (action) {
+	switch(action) {
+	case DISC_CBACT_INIT:
 		if (pppoeSession->server) {
-			LOG(3, pppoeSession, "discover server session started %s/%s\n", pppoeSession->ac_name, pppoeSession->service_name);
+			LOG(3, pppoeSession, "discover server session initialised %s/%s\n", pppoeSession->ac_name, pppoeSession->service_name);
 			downstream=pppoeSession;
 			strcpy(pppoeSession->label, "dn ");
+			LOG(3, pppoeSession, "set label: %s\n", pppoeSession->label);
+		} else {
+			LOG(3, pppoeSession, "discover client session initialised %s/%s\n", pppoeSession->ac_name, pppoeSession->service_name);
+			/* See if we already have this session */
+			for (i=0; i<MAX_LINK && upstream[i]!=pppoeSession; i++);
+			if (i==MAX_LINK)
+			{
+				/* Search for free spot */
+				for (i=0; i<MAX_LINK && upstream[i]; i++);
+				if (i<MAX_LINK) {
+					sprintf(pppoeSession->label, "up%d", i);
+					upstream[i]=pppoeSession;
+					LOG(3, pppoeSession, "set label: %s\n", pppoeSession->label);
+				} else {
+					sysFatal("No more space for upstream\n");
+				}
+			}
+		}
+		break;
+
+	case DISC_CBACT_OPEN:
+		if (pppoeSession->server) {
+			LOG(3, pppoeSession, "discover server session opened %s/%s\n", pppoeSession->ac_name, pppoeSession->service_name);
+	
 			pppServer(pppoeSession, ppp_cb);
 
-			discoveryClient((PPPoEInterface *) pppoeSession->iface, NULL, NULL, 10); // Lose the const
+			discoveryClient((PPPoEInterface *) pppoe_up[0], NULL, NULL, 10); // Lose the const
 		} else {
-			LOG(3, pppoeSession, "discover client session started %s/%s\n", pppoeSession->ac_name, pppoeSession->service_name);
-			for (i=0; i<MAX_LINK && upstream[i]; i++);
-			if (i<MAX_LINK)
-			{
-				sprintf(pppoeSession->label, "up%d", i);
-				upstream[i]=pppoeSession;
-			} else {
-				sysFatal("No more space for upstream\n");
-			}
+			LOG(3, pppoeSession, "discover client session opened %s/%s\n", pppoeSession->ac_name, pppoeSession->service_name);
 			pppClient(pppoeSession, ppp_cb);
 		}
-	} else {
+		break;
+
+	case DISC_CBACT_SHUTDOWN:
 		// Shutdown session
 		if (pppoeSession==downstream) {
+			LOG(3, pppoeSession, "discover server session shutdown %s/%s\n", pppoeSession->ac_name, pppoeSession->service_name);
 			downstream=NULL;
+			/* Kill all the upstream sessions */
+			for (i=0; i<MAX_LINK; i++) {
+				if (upstream[i]) {
+					pppoeSessionKill(upstream[i]);
+				}
+			}
+		} else {
+			LOG(3, pppoeSession, "discover client session shutdown %s/%s\n", pppoeSession->ac_name, pppoeSession->service_name);
+			for (i=0; i<MAX_LINK && upstream[i]!=pppoeSession; i++);
+			if (i<MAX_LINK) {
+				upstream[i]=NULL;
+			}
 		}
-		for (i=0; i<MAX_LINK && upstream[i]!=pppoeSession; i++);
-		upstream[i]=NULL;
+		break;
 	}
 }
 

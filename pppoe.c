@@ -120,8 +120,12 @@ char * get_string_codepad(uint8_t codepad)
 }
 
 static void initDiscovery() {
+	memset(pppoe_interface, 0, sizeof(PPPoEInterface) * MAX_PPPOE_SESSION);
 	memset(pppoe_sessions, 0, sizeof(PPPoESession) * MAX_PPPOE_SESSION);
-	hostUniq=getpid();
+	
+	hostUniq=random() & 0xffff;
+	hostUniq <<= 16;
+	hostUniq +=random() & 0xffff;
 
 	init_done=1;
 }
@@ -236,12 +240,12 @@ void pppoeSessionKill(PPPoESession *pppoeSession)
 	if (pppoeSession->sid) {
 		/* Only do this for open sessions */
 		pppoe_send_PADT(pppoeSession->iface, pppoeSession->sid, pppoeSession->peerMac);
-		(pppoeSession->iface->discovery_cb)((void *) pppoeSession, 0); // OK I know it's a const
 	}
 	if (pppoeSession->timerEvent) {
 		stopTimer(pppoeSession->timerEvent);
 		pppoeSession->timerEvent=NULL;
 	}
+	(pppoeSession->iface->discovery_cb)((void *) pppoeSession, DISC_CBACT_SHUTDOWN); // OK I know it's a const
 	memset((void *) pppoeSession, 0, sizeof(PPPoESession)); // OK I know it's a const
 }
 
@@ -288,9 +292,15 @@ openPPPoEInterface(char const *ifname, discovery_cb_func cb)
 	int i;
 	PPPoEInterface *pppoe;
 
+	if (!init_done) {
+		initDiscovery();
+	}
+
+	LOG(3, NULL, "pppoe: open interface %s\n", ifname);
 	/* Look for an existing interface */
 	for (i=0; i<MAX_PPPOE_SESSION && pppoe_interface[i].name[0]; i++) {
 		if (strcmp(ifname, pppoe_interface[i].name)==0) {
+			LOG(3, NULL, "pppoe: interface %s already open\n", ifname);
 			return(&pppoe_interface[i]);
 		}
 	}
@@ -527,9 +537,10 @@ static void pppoe_send_PADI(const PPPoEInterface *iface)
 		return;
 	}
 
+	pppoeSession->server=0;
+	(iface->discovery_cb)((void *) pppoeSession, DISC_CBACT_INIT);
 	pppoeSession->timerEvent=newTimer(pppoe_timer_cb, pppoeSession);
 	startTimer(pppoeSession->timerEvent, 2);
-	pppoeSession->server=0;
 	pppoeSession->lastPacketType=PADI_CODE;
 	pppoe_disc_send(iface, pack);
 }
@@ -686,8 +697,9 @@ static void pppoe_recv_PADI(const PPPoEInterface *iface, uint8_t *pack, int size
 		return;
 	}
 
-	pppoeSession->timerEvent=newTimer(pppoe_timer_cb, pppoeSession);
 	pppoeSession->server=1;
+	(iface->discovery_cb)((void *) pppoeSession, DISC_CBACT_INIT);
+	pppoeSession->timerEvent=newTimer(pppoe_timer_cb, pppoeSession);
 	startTimer(pppoeSession->timerEvent, 2);
 	pppoe_send_PADO(pppoeSession, ethhdr->h_source, host_uniq_tag, relay_sid_tag, service_name_tag);
 }
@@ -952,7 +964,7 @@ static void pppoe_recv_PADR(const PPPoEInterface *iface, uint8_t *pack, int size
 #endif
 	pppoe_send_PADS(pppoeSession, pppoeSession->sid, ethhdr->h_source, host_uniq_tag, relay_sid_tag, service_name_tag);
 
-	(*iface->discovery_cb)(pppoeSession, 1);
+	(*iface->discovery_cb)(pppoeSession, DISC_CBACT_OPEN);
 }
 
 // Only used in client mode
@@ -1042,7 +1054,7 @@ static void pppoe_recv_PADS(const PPPoEInterface *iface, uint8_t *pack, int size
 	memcpy(pppoeSession->peerMac, ethhdr->h_source, ETH_ALEN);
 	pppoeSession->server=0;
 	stopTimer(pppoeSession->timerEvent);
-	(*iface->discovery_cb)(pppoeSession, 1);
+	(*iface->discovery_cb)(pppoeSession, DISC_CBACT_OPEN);
 }
 
 // pppoe discovery recv data

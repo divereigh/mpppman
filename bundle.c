@@ -261,12 +261,12 @@ void processmp(PPPSession *pppSession, uint8_t *p, uint16_t l)
 	{
 		// Get 24 bit for seq number
 		// Process this manually so we don't get endian issues
-		seqnum=0;
+		seq_num=0;
 		p++;
 		for (i=0; i<3; i++) {
 			p++;
-			seqnum <<= 8;
-			seqnum += *(p++);
+			seq_num <<= 8;
+			seq_num += *(p++);
 		}
 			
 		p += 4;

@@ -6,6 +6,10 @@
 #include <string.h>
 #include <time.h>
 
+#ifdef HAVE_FCNTL_H
+#include <fcntl.h>
+#endif
+
 #ifdef HAVE_UNISTD_H
 #include <unistd.h>
 #endif
@@ -35,10 +39,6 @@
 #ifdef HAVE_STDINT_H
 #include <stdint.h>
 #endif
-
-#include <errno.h>
-#include <stdlib.h>
-#include <string.h>
 
 #ifdef HAVE_NET_IF_ARP_H
 #include <net/if_arp.h>
@@ -79,6 +79,9 @@ PPPoESession *upstream[MAX_LINK];
 
 PPPoEInterface *pppoe_dn;
 PPPoEInterface *pppoe_up[MAX_LINK];
+
+char *iface_name_dn;
+char *iface_name_up[MAX_LINK];
 
 /* Stages of sessions are:
 Downstream
@@ -283,14 +286,14 @@ int main(int argc, char *argv[]) {
 			debuglevel=atoi(optarg);
 			break;
 		case 'c':
-			pppoe_up[link_count]=openPPPoEInterface(optarg, discovery_cb);
+			iface_name_up[link_count]=strdup(optarg);
 			link_count++;
 			break;
 		case 's':
-			if (pppoe_dn) {
+			if (iface_name_dn) {
 				sysFatal("Can only specify one server\n");
 			}
-			pppoe_dn=openPPPoEInterface(optarg, discovery_cb);
+			iface_name_dn=strdup(optarg);
 			break;
 		default:
 			printf("Args are:\n"
@@ -305,11 +308,32 @@ int main(int argc, char *argv[]) {
 	}
 
 	if (!opt_foreground) {
-		if (fork()) exit(0);
-		setsid();
-		if(!freopen("/dev/null", "r", stdin)) LOG(0, 0, 0, "Error freopen stdin: %s\n", strerror(errno));
-		if(!freopen("/dev/null", "w", stdout)) LOG(0, 0, 0, "Error freopen stdout: %s\n", strerror(errno));
-		if(!freopen("/dev/null", "w", stderr)) LOG(0, 0, 0, "Error freopen stderr: %s\n", strerror(errno));
+		if (fork()==0) {
+			close(0);
+			close(1);
+			close(2);
+			open("/dev/null", O_RDWR);
+			open("/dev/null", O_RDWR);
+			open("/dev/null", O_RDWR);
+			setsid();
+
+			syslog(LOG_DAEMON, "Watcher started");
+			/* Now fork again, to create a watcher */
+			while (fork()!=0) {
+				int status;
+				wait(&status);
+				syslog(LOG_DAEMON, "mpppman exited status: %d", status);
+				sleep(2); // So we don't spin
+			}
+		} else {
+			exit(0);
+		}
+	}
+	syslog(LOG_DAEMON, "mpppman started");
+
+	pppoe_dn=openPPPoEInterface(iface_name_dn, discovery_cb);
+	for (i=0; i<link_count; i++) {
+		pppoe_up[i]=openPPPoEInterface(iface_name_up[i], discovery_cb);
 	}
 
 	discoveryServer(pppoe_dn, NULL, NULL);

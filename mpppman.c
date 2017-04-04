@@ -10,8 +10,8 @@
 #include <fcntl.h>
 #endif
 
-#ifdef HAVE_WAIT_H
-#include <wait.h>
+#ifdef HAVE_SYS_WAIT_H
+#include <sys/wait.h>
 #endif
 
 #ifdef HAVE_UNISTD_H
@@ -226,10 +226,12 @@ void discovery_cb(PPPoESession *pppoeSession, int action)
 				if (i<MAX_LINK) {
 					sprintf(pppoeSession->label, "up%d", i);
 					upstream[i]=pppoeSession;
-					LOG(3, pppoeSession, "set label: %s\n", pppoeSession->label);
+					// LOG(3, pppoeSession, "set label: %s\n", pppoeSession->label);
 				} else {
 					sysFatal("No more space for upstream\n");
 				}
+			} else {
+				sprintf(pppoeSession->label, "up%d", i);
 			}
 		}
 		break;
@@ -333,7 +335,7 @@ int main(int argc, char *argv[]) {
 		}
 	}
 	initlog(argv[0]);
-	LOG(1, NULL, "mpppman started");
+	LOG(1, NULL, "mpppman started\n");
 
 	srand(getpid());
 	initEvent();

@@ -126,6 +126,7 @@ void processpap(PPPSession *pppSession, uint8_t *p, int l)
 				LOG(3, pppSession->pppoeSession, "LCP AUTH: Authentication succeeded\n");
 				sendauthresp(pppSession, p[1], 2, "Auth Suceeded");
 				pppSession->lcp_authtype=0; // Signal auth complete
+				sessionsetup(pppSession);
 				lcp_open(pppSession);
 				return;
 			}

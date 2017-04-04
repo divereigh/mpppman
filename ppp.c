@@ -542,6 +542,20 @@ PPPSession *pppClient(PPPoESession *pppoeSession, ppp_cb_func cb)
 
 int sessionsetup(PPPSession *pppSession)
 {
+	LOG(3, pppSession->pppoeSession, "Doing server session setup for session\n");
+
+	// Join a bundle if the MRRU option is accepted
+	if(pppSession->mrru > 0 && pppSession->bundle == NULL)
+	{
+		LOG(3, pppSession->pppoeSession, "This session can be part of multilink bundle\n");
+		if (join_bundle(pppSession) == NULL)
+		{
+			LOG(0, pppSession->pppoeSession, "MPPP: Unable to join bundle\n");
+			sessionshutdown(pppSession, 1, "Unable to join bundle");
+			return 0;
+		}
+	}
+
 #if 0
 	// A session now exists, set it up
 	in_addr_t ip;

@@ -38,8 +38,10 @@ void _log_hex(int level, const PPPoESession *pppoe, const char *title, const uin
 
 extern int debuglevel;
 extern FILE *log_stream;
+extern int syslog_log;
 char *fmtaddr(in_addr_t addr, int n);
 char *fmtMacAddr(const uint8_t *pMacAddr);
 char *fmtBinary(const uint8_t *pData, size_t len);
+void initlog(char *prog);
 
 #endif

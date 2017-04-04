@@ -40,7 +40,7 @@
 
 #include "log.h"
 
-FILE *log_stream;
+FILE *log_stream=NULL;
 int syslog_log=0;
 
 /**********************************************************************
@@ -121,7 +121,7 @@ void _log(int level, const PPPoESession *pppoe, const char *format, ...)
 	if (log_stream)
 		fprintf(log_stream, "%s [%04x-%-3s] %s", time_now_string, pppoe ? pppoe->sid : 0, pppoe ? pppoe->label : "", message);
 	else if (syslog_log)
-		syslog(level + 2, "[%04x-%-3s] %s", pppoe ? pppoe->sid : 0, pppoe ? pppoe->label : "", message); // We don't need LOG_EMERG or LOG_ALERT
+		syslog(LOG_INFO, "[%04x-%-3s] %s", pppoe ? pppoe->sid : 0, pppoe ? pppoe->label : "", message); // We don't need LOG_EMERG or LOG_ALERT
 
 	va_end(ap);
 }
@@ -216,3 +216,10 @@ char *fmtBinary(const uint8_t *pData, const size_t len)
   	return strData;
 }
 
+void initlog(char *prog)
+{
+	if (syslog_log) {
+		closelog();
+		openlog(prog, LOG_NDELAY, LOG_DAEMON);
+	}
+}

@@ -10,6 +10,10 @@
 #include <fcntl.h>
 #endif
 
+#ifdef HAVE_WAIT_H
+#include <wait.h>
+#endif
+
 #ifdef HAVE_UNISTD_H
 #include <unistd.h>
 #endif
@@ -267,11 +271,9 @@ void discovery_cb(PPPoESession *pppoeSession, int action)
 
 int main(int argc, char *argv[]) {
 	int i;
-	log_stream=stdout;
 	int opt_foreground=0;
 
-	srand(getpid());
-	initEvent();
+	syslog_log=1;
 
 	// scan args
 	while ((i = getopt(argc, argv, "fd:s:c:")) >= 0)
@@ -281,6 +283,7 @@ int main(int argc, char *argv[]) {
 		case 'f':
 			opt_foreground=1;
 			log_stream=stdout;
+			syslog_log=0;
 			break;
 		case 'd':
 			debuglevel=atoi(optarg);
@@ -317,7 +320,7 @@ int main(int argc, char *argv[]) {
 			open("/dev/null", O_RDWR);
 			setsid();
 
-			syslog(LOG_DAEMON, "Watcher started");
+			syslog(LOG_DAEMON, "mpppman watcher started");
 			/* Now fork again, to create a watcher */
 			while (fork()!=0) {
 				int status;
@@ -329,7 +332,11 @@ int main(int argc, char *argv[]) {
 			exit(0);
 		}
 	}
-	syslog(LOG_DAEMON, "mpppman started");
+	initlog(argv[0]);
+	LOG(1, NULL, "mpppman started");
+
+	srand(getpid());
+	initEvent();
 
 	pppoe_dn=openPPPoEInterface(iface_name_dn, discovery_cb);
 	for (i=0; i<link_count; i++) {

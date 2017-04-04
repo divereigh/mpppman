@@ -264,12 +264,10 @@ void processmp(PPPSession *pppSession, uint8_t *p, uint16_t l)
 		seq_num=0;
 		p++;
 		for (i=0; i<3; i++) {
-			p++;
 			seq_num <<= 8;
 			seq_num += *(p++);
 		}
 			
-		p += 4;
 		l -= 4;
 		// After this point the pointer should be advanced 4 bytes
 		LOG(4, pppSession->pppoeSession, "MPPP: 24 bits sequence number:%d\n",seq_num);

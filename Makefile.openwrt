@@ -59,7 +59,7 @@ endef
 # much easier to do it this way.
 define Build/Prepare
 	mkdir -p $(PKG_BUILD_DIR)
-	$(CP) -a ../* $(PKG_BUILD_DIR)/
+	$(CP) -a ./mpppman/* $(PKG_BUILD_DIR)/
 endef
 
 

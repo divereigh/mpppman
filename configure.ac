@@ -12,6 +12,7 @@ AC_CHECK_HEADERS(linux/if_pppox.h, [], [],
 #include<net/ethernet.h>
 #include<linux/if.h>
 #include<linux/in.h>
+#include<linux/in6.h>
 ])
 
 AC_TYPE_UINT8_T

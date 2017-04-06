@@ -49,6 +49,7 @@
 #include "lcp.h"
 #include "common.h"
 #include "event.h"
+#include "ip.h"
 
 
 #define SESS_CODE           0x00
@@ -1133,6 +1134,12 @@ void processDiscovery(const PPPoEInterface *iface, uint8_t *pack, int size)
 	}
 }
 
+uint8_t *pppoe_session_forward(const PPPoESession *pppoeSession, uint8_t *b, uint16_t l)
+{
+	setup_header(b, pppoeSession->iface->mac, pppoeSession->peerMac, SESS_CODE, pppoeSession->sid, ETH_P_PPP_SES);
+	pppoe_sess_send(pppoeSession, b, l);
+}
+
 void processSession(const PPPoEInterface *iface, uint8_t *pack, int size)
 {
 	struct ethhdr *ethhdr = (struct ethhdr *)pack;
@@ -1142,6 +1149,7 @@ void processSession(const PPPoEInterface *iface, uint8_t *pack, int size)
 	uint16_t proto, sid, t;
 	int doclient=0;
 	PPPoESession *pppoeSession;
+	PPPSession *pppForward;
 
 	if (doclient) {
 #if 0
@@ -1176,7 +1184,11 @@ void processSession(const PPPoEInterface *iface, uint8_t *pack, int size)
 	}
 
 	if (pppoeSession->pppSession) {
-		processPPP(pppoeSession->pppSession, pppdata, lppp);
+		if (canPPPForward(pppoeSession->pppSession, pppdata, lppp) && (pppForward=selectFwdSession(pppoeSession->pppSession))) {
+			pppoe_session_forward(pppForward->pppoeSession, pack, size);
+		} else {
+			processPPP(pppoeSession->pppSession, pppdata, lppp);
+		}
 	} else {
 		LOG(3, NULL, "Error processSession: no pppSession active\n");
 	}

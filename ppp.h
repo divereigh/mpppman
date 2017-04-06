@@ -267,5 +267,6 @@ uint8_t *ppp_conf_nak(PPPSession *pppSession, uint8_t *buf, size_t blen, uint16_
 	uint8_t *value, size_t vlen);
 uint8_t *ppp_conf_rej(PPPSession *pppSession, uint8_t *buf, size_t blen, uint16_t mtype,
 	uint8_t **response, uint8_t *queued, uint8_t *packet, uint8_t *option);
+int canPPPForward(PPPSession *pppSession, uint8_t *pack, int size);
 
 #endif

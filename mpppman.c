@@ -62,7 +62,8 @@
 #define INTERFACE_UP2 "vlan51"
 #define MAX_LINK 10
 int debuglevel=0;
-int link_count=0;
+int up_link_count=0;
+int dn_link_count=0;
 time_t time_now = 0;
 uint64_t time_now_ms = 0;		// Current time in milliseconds since epoch.
 
@@ -78,7 +79,7 @@ void cb_func(evutil_socket_t fd, short what, void *arg)
 		data);
 }
 
-PPPoESession *downstream=NULL;
+PPPoESession *downstream;
 PPPoESession *upstream[MAX_LINK];
 
 PPPoEInterface *pppoe_dn;
@@ -173,7 +174,7 @@ void ppp_cb(PPPSession *pppSession, int action)
 				}
 				/* Start another session */
 				LOG(3, pppSession->pppoeSession, "Client count: %d\n", discoveryClientCount());
-				if (discoveryClientCount()<link_count) {
+				if (discoveryClientCount()<up_link_count) {
 					for (i=0; i<MAX_LINK && upstream[i]!=NULL; i++);
 					if (i<MAX_LINK) {
 						LOG(3, pppSession->pppoeSession, "Start client: %d\n", i);
@@ -291,8 +292,8 @@ int main(int argc, char *argv[]) {
 			debuglevel=atoi(optarg);
 			break;
 		case 'c':
-			iface_name_up[link_count]=strdup(optarg);
-			link_count++;
+			iface_name_up[up_link_count]=strdup(optarg);
+			up_link_count++;
 			break;
 		case 's':
 			if (iface_name_dn) {
@@ -341,7 +342,7 @@ int main(int argc, char *argv[]) {
 	initEvent();
 
 	pppoe_dn=openPPPoEInterface(iface_name_dn, discovery_cb);
-	for (i=0; i<link_count; i++) {
+	for (i=0; i<up_link_count; i++) {
 		pppoe_up[i]=openPPPoEInterface(iface_name_up[i], discovery_cb);
 	}
 

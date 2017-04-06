@@ -207,6 +207,45 @@ void protoreject(PPPSession *pppSession, uint8_t *pack, int size, uint16_t proto
 {
 }
 
+/* Extract the PPP protocol number */
+uint16_t getPPPproto(PPPSession *pppSession, uint8_t *pack, int size)
+{
+	uint16_t proto;
+	
+	if (size > 2 && pack[0] == 0xFF && pack[1] == 0x03)
+	{	// HDLC address header, discard
+		pack += 2;
+		size -= 2;
+	}
+
+	if (size < 2)
+	{
+		LOG(3, pppSession->pppoeSession, "Error process_pppoe_sess: Short ppp length %d\n", size);
+		return(0);
+	}
+	if (*pack & 1)
+	{
+		// Deal with single byte proto
+		proto = *pack;
+	}
+	else
+	{
+		proto = ntohs(*(uint16_t *) pack);
+	}
+	return(proto);
+}
+
+int canPPPForward(PPPSession *pppSession, uint8_t *pack, int size)
+{
+	uint16_t proto;
+	proto=getPPPproto(pppSession, pack, size);
+	if (proto == PPP_MP && pppSession->link) {
+		return(1);
+	} else {
+		return(0);
+	}
+}
+
 /* Process PPP packet - pack points the PPP payload */
 void processPPP(PPPSession *pppSession, uint8_t *pack, int size)
 {
@@ -226,7 +265,7 @@ void processPPP(PPPSession *pppSession, uint8_t *pack, int size)
 	}
 	if (*pack & 1)
 	{
-		/* No idea what this is - DAI */
+		// Deal with single byte proto
 		proto = *pack++;
 		size--;
 	}

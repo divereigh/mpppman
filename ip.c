@@ -439,6 +439,30 @@ void processipcp(PPPSession *pppSession, uint8_t *p, uint16_t l)
 	}
 }
 
+PPPSession *selectFwdSession(PPPSession *pppSession)
+{
+	if(pppSession->bundle != NULL && pppSession->bundle->num_of_links > 1)
+	{
+		PPPBundle *b = pppSession->bundle;
+		PPPSession *pS;
+		int i;
+
+		for (i = 0;i < b->num_of_links;i++)
+		{
+			b->current_ses = (b->current_ses + 1) % b->num_of_links;
+
+			pS = b->members[b->current_ses];
+			// Only include sessions where we have received a echo reply in the last 2 secs
+			if (pS->ppp.lcp == Opened && (pS->last_echo-pS->last_echo_reply < 2)) {
+				return(pS);
+			} else {
+				LOG(3, pS->pppoeSession, "MPPP: Skipping session - not responding\n");
+			}
+		}
+	}
+	return(pppSession);
+}
+
 // process outgoing IP
 //
 // (i.e. this routine writes to data[-8]).

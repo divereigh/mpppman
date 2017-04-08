@@ -1184,7 +1184,7 @@ void processSession(const PPPoEInterface *iface, uint8_t *pack, int size)
 	}
 
 	if (pppoeSession->pppSession) {
-		if (canPPPForward(pppoeSession->pppSession, pppdata, lppp) && (pppForward=selectFwdSession(pppoeSession->pppSession))) {
+		if (canPPPForward(pppoeSession->pppSession, pppdata, lppp) && (pppForward=selectFwdSession(pppoeSession->pppSession->link))) {
 			pppoe_session_forward(pppForward->pppoeSession, pack, size);
 		} else {
 			processPPP(pppoeSession->pppSession, pppdata, lppp);

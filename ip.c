@@ -453,7 +453,8 @@ PPPSession *selectFwdSession(PPPSession *pppSession)
 
 			pS = b->members[b->current_ses];
 			// Only include sessions where we have received a echo reply in the last 2 secs
-			if (pS->ppp.lcp == Opened && (pS->last_echo-pS->last_echo_reply < 2)) {
+			// if (pS->ppp.lcp == Opened && (pS->last_echo-pS->last_echo_reply < 2)) {
+			if (pS->ppp.lcp == Opened) {
 				return(pS);
 			} else {
 				LOG(3, pS->pppoeSession, "MPPP: Skipping session - not responding\n");
@@ -506,7 +507,8 @@ void processip_out(PPPSession *pppSession, uint8_t *buf, int len)
 		{
 			PPPSession *pS = b->members[i];
 			// Only include sessions where we have received a echo reply in the last 2 secs
-			if (pS->ppp.lcp == Opened && (pS->last_echo-pS->last_echo_reply < 2))
+			// if (pS->ppp.lcp == Opened && (pS->last_echo-pS->last_echo_reply < 2))
+			if (pS->ppp.lcp == Opened)
 			{
 				members[nb_opened] = pS;
 				nb_opened++;

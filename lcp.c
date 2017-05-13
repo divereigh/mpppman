@@ -20,8 +20,8 @@
 #include "auth.h"
 #include "ip.h"
 
-#define DEAD_TIMER 1 /* Time between echo packets, session killed after DEAD_LOST missed ones */
-#define DEAD_LOST 10
+#define DEAD_TIMER 10 /* Time between echo packets, session killed after DEAD_LOST missed ones */
+#define DEAD_LOST 2
 
 static uint32_t mp_epdis_magic=0;
 
